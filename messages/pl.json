@@ -1,7 +1,7 @@
 {
     "HomePage": {
-        "title": "Witaj w Next.js Auth",
-        "description": "Kompletny system autentykacji z Supabase.",
+        "title": "Witaj w Quiz App",
+        "description": "Najlepsze miejsce do sprawdzenia swojej wiedzy.",
         "getStarted": "Rozpocznij",
         "learnMore": "Dowiedz się więcej"
     },

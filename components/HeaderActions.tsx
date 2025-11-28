@@ -35,7 +35,16 @@ export default function HeaderActions() {
     };
 
     return (
-        <div className="absolute top-4 right-4 flex items-center gap-4 z-50">
+        <header className="absolute top-0 left-0 right-0 h-16 px-4 flex items-center justify-between z-50 border-b bg-background/80 backdrop-blur-sm">
+            <div className="flex items-center gap-2">
+                <h1 
+                    className="text-2xl font-bold cursor-pointer bg-linear-to-r from-primary to-primary/70 bg-clip-text text-transparent" 
+                    onClick={() => router.push('/dashboard')}
+                >
+                    Quizy
+                </h1>
+            </div>
+            <div className="flex items-center gap-4">
             {user && (
                 <>
                     <EditProfileDialog 
@@ -58,10 +67,6 @@ export default function HeaderActions() {
                         <DropdownMenuContent align="center" className="w-56">
                             <DropdownMenuLabel>{tDashboard("userProfile")}</DropdownMenuLabel>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onSelect={() => router.push('/dashboard')}>
-                                <UserIcon className="mr-2 h-4 w-4" />
-                                <span>{tDashboard("title")}</span>
-                            </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => router.push('/settings')}>
                                 <Settings className="mr-2 h-4 w-4" />
                                 <span>{tDashboard("securitySettings")}</span>
@@ -77,6 +82,7 @@ export default function HeaderActions() {
             )}
             <LanguageSwitcher />
             <ThemeToggle />
-        </div>
+            </div>
+        </header>
     );
 }

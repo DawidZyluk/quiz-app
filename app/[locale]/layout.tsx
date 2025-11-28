@@ -9,8 +9,8 @@ import HeaderActions from "@/components/HeaderActions";
 import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
-  title: "Auth App",
-  description: "Authentication app",
+  title: "Quiz App",
+  description: "Quizy Application",
 };
 
 import { ThemeProvider } from "@/components/theme-provider";
