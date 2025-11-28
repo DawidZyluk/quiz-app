@@ -192,3 +192,70 @@ export async function createQuestion(data: QuestionData) {
   revalidatePath(`/dashboard/quiz/${quiz_id}`);
   return { success: true };
 }
+
+export async function updateFlashcardStatus(flashcardId: string, status: 'remembered' | 'forgotten') {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase
+    .from("user_flashcard_progress")
+    .upsert(
+      {
+        user_id: user.id,
+        flashcard_id: flashcardId,
+        status,
+        last_reviewed_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id, flashcard_id" }
+    );
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { success: true };
+}
+
+export async function resetDeckProgress(deckId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Find all flashcards in the deck
+  const { data: flashcards, error: fetchError } = await supabase
+    .from("flashcards")
+    .select("id")
+    .eq("deck_id", deckId);
+
+  if (fetchError) {
+    return { error: fetchError.message };
+  }
+
+  const flashcardIds = flashcards.map((f) => f.id);
+
+  if (flashcardIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("user_flashcard_progress")
+      .delete()
+      .eq("user_id", user.id)
+      .in("flashcard_id", flashcardIds);
+
+    if (deleteError) {
+      return { error: deleteError.message };
+    }
+  }
+
+  revalidatePath(`/dashboard/deck/${deckId}`);
+  return { success: true };
+}

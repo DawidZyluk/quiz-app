@@ -17,7 +17,8 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { EditProfileDialog } from "@/components/EditProfileDialog";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
-import { Settings, User as UserIcon, LogOut } from "lucide-react";
+import { Settings, User as UserIcon, LogOut, Database } from "lucide-react";
+import { seedData } from "@/lib/seed";
 
 export default function HeaderActions() {
     const { user, signOut } = useAuth();
@@ -70,6 +71,10 @@ export default function HeaderActions() {
                             <DropdownMenuItem onSelect={() => router.push('/settings')}>
                                 <Settings className="mr-2 h-4 w-4" />
                                 <span>{tDashboard("securitySettings")}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => seedData()}>
+                                <Database className="mr-2 h-4 w-4" />
+                                <span>Seed Data (Dev)</span>
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onSelect={signOut} className="text-destructive focus:text-destructive">
