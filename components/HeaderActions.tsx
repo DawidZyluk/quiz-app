@@ -1,25 +1,82 @@
 "use client";
 
+import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTranslations } from "next-intl";
-import { Button } from "@/components/ui/button";
+import { useRouter } from "@/i18n/routing";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { EditProfileDialog } from "@/components/EditProfileDialog";
+import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
+import { Settings, User as UserIcon, LogOut } from "lucide-react";
 
 export default function HeaderActions() {
     const { user, signOut } = useAuth();
-    const t = useTranslations("Auth");
+    const router = useRouter();
+    const tAuth = useTranslations("Auth");
+    const tDashboard = useTranslations("Dashboard");
+    
+    const [editProfileOpen, setEditProfileOpen] = useState(false);
+    const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+
+    const getInitials = () => {
+        if (!user) return "U";
+        const name = (user.user_metadata?.full_name as string) || user.email || "U";
+        return name.substring(0, 2).toUpperCase();
+    };
 
     return (
         <div className="absolute top-4 right-4 flex items-center gap-4 z-50">
             {user && (
-                <Button variant="outline" onClick={signOut}>
-                    {t("logout")}
-                </Button>
+                <>
+                    <EditProfileDialog 
+                        user={user} 
+                        open={editProfileOpen} 
+                        onOpenChange={setEditProfileOpen} 
+                    />
+                    <ChangePasswordDialog 
+                        open={changePasswordOpen} 
+                        onOpenChange={setChangePasswordOpen} 
+                    />
+                    
+                    <DropdownMenu>
+                        <DropdownMenuTrigger className="cursor-pointer focus:outline-none" asChild>
+                            <Avatar>
+                                <AvatarImage src={user.user_metadata?.avatar_url} />
+                                <AvatarFallback>{getInitials()}</AvatarFallback>
+                            </Avatar>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="center" className="w-56">
+                            <DropdownMenuLabel>{tDashboard("userProfile")}</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onSelect={() => router.push('/dashboard')}>
+                                <UserIcon className="mr-2 h-4 w-4" />
+                                <span>{tDashboard("title")}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => router.push('/settings')}>
+                                <Settings className="mr-2 h-4 w-4" />
+                                <span>{tDashboard("securitySettings")}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onSelect={signOut} className="text-destructive focus:text-destructive">
+                                <LogOut className="mr-2 h-4 w-4" />
+                                <span>{tAuth("logout")}</span>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </>
             )}
             <LanguageSwitcher />
             <ThemeToggle />
         </div>
     );
 }
-

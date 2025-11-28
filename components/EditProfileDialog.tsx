@@ -31,11 +31,21 @@ const formSchema = z.object({
 
 interface EditProfileDialogProps {
   user: User
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function EditProfileDialog({ user }: EditProfileDialogProps) {
-  const [open, setOpen] = useState(false)
+export function EditProfileDialog({ user, open, onOpenChange }: EditProfileDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  
+  const isControlled = open !== undefined
+  const finalOpen = isControlled ? open : internalOpen
+  const setFinalOpen = (value: boolean) => {
+    if (onOpenChange) onOpenChange(value)
+    if (!isControlled) setInternalOpen(value)
+  }
+
   const router = useRouter()
   const t = useTranslations("Dashboard")
   const tCommon = useTranslations("Common")
@@ -64,7 +74,7 @@ export function EditProfileDialog({ user }: EditProfileDialogProps) {
       }
 
       toast.success(t("profileUpdated"))
-      setOpen(false)
+      setFinalOpen(false)
       router.refresh()
     } catch (error) {
       toast.error(t("updateError"))
@@ -75,10 +85,12 @@ export function EditProfileDialog({ user }: EditProfileDialogProps) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="w-full mt-4">{t("editProfile")}</Button>
-      </DialogTrigger>
+    <Dialog open={finalOpen} onOpenChange={setFinalOpen}>
+      {!isControlled && (
+        <DialogTrigger asChild>
+          <Button className="w-full mt-4">{t("editProfile")}</Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>{t("editProfile")}</DialogTitle>

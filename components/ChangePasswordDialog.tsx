@@ -32,9 +32,22 @@ const formSchema = z.object({
   path: ["confirmPassword"],
 })
 
-export function ChangePasswordDialog() {
-  const [open, setOpen] = useState(false)
+interface ChangePasswordDialogProps {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  const isControlled = open !== undefined
+  const finalOpen = isControlled ? open : internalOpen
+  const setFinalOpen = (value: boolean) => {
+    if (onOpenChange) onOpenChange(value)
+    if (!isControlled) setInternalOpen(value)
+  }
+
   const router = useRouter()
   const t = useTranslations("Dashboard")
   const tAuth = useTranslations("Auth")
@@ -62,7 +75,7 @@ export function ChangePasswordDialog() {
       }
 
       toast.success(t("passwordUpdated"))
-      setOpen(false)
+      setFinalOpen(false)
       reset()
       router.refresh()
     } catch (error) {
@@ -74,12 +87,14 @@ export function ChangePasswordDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" className="w-full mt-4">
-           {t("changePassword")}
-        </Button>
-      </DialogTrigger>
+    <Dialog open={finalOpen} onOpenChange={setFinalOpen}>
+      {!isControlled && (
+        <DialogTrigger asChild>
+          <Button variant="outline" className="w-full mt-4">
+            {t("changePassword")}
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>{t("changePassword")}</DialogTitle>
