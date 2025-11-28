@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, BookOpen, GraduationCap } from "lucide-react";
 import { AddQuestionDialog } from "@/components/AddQuestionDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -17,6 +17,8 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Badge } from "@/components/ui/badge";
+import { QuizStudy } from "@/components/QuizStudy";
+import { QuizExam } from "@/components/QuizExam";
 
 interface Quiz {
   id: string;
@@ -51,6 +53,7 @@ export default function QuizPage() {
   const [topic, setTopic] = useState<Topic | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'list' | 'study' | 'exam'>('list');
 
   useEffect(() => {
     if (!loading && !user) {
@@ -116,6 +119,28 @@ export default function QuizPage() {
 
   if (!quiz) return null;
 
+  if (viewMode === 'study') {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8 flex items-center justify-center">
+        <QuizStudy 
+          questions={questions} 
+          onExit={() => setViewMode('list')} 
+        />
+      </div>
+    );
+  }
+
+  if (viewMode === 'exam') {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8 flex items-center justify-center">
+        <QuizExam 
+          questions={questions} 
+          onExit={() => setViewMode('list')} 
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -142,15 +167,28 @@ export default function QuizPage() {
 
         {/* Header */}
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => router.push(`/dashboard/topic/${quiz.topic_id}`)}>
-              <ArrowLeft className="h-6 w-6" />
-            </Button>
-            <div>
-              <h1 className="text-3xl font-bold">{quiz.title}</h1>
-              {quiz.description && (
-                <p className="text-muted-foreground mt-1">{quiz.description}</p>
-              )}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button variant="ghost" size="icon" onClick={() => router.push(`/dashboard/topic/${quiz.topic_id}`)}>
+                <ArrowLeft className="h-6 w-6" />
+              </Button>
+              <div>
+                <h1 className="text-3xl font-bold">{quiz.title}</h1>
+                {quiz.description && (
+                  <p className="text-muted-foreground mt-1">{quiz.description}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button onClick={() => setViewMode('study')} disabled={questions.length === 0} variant="outline">
+                <BookOpen className="mr-2 h-4 w-4" />
+                Study Mode
+              </Button>
+              <Button onClick={() => setViewMode('exam')} disabled={questions.length === 0}>
+                <GraduationCap className="mr-2 h-4 w-4" />
+                Take Test
+              </Button>
             </div>
           </div>
           
@@ -209,4 +247,3 @@ export default function QuizPage() {
     </div>
   );
 }
-
