@@ -7,8 +7,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Plus, Layers } from "lucide-react";
+import { ArrowLeft, Plus, Layers, FileQuestion } from "lucide-react";
 import { CreateDeckDialog } from "@/components/CreateDeckDialog";
+import { CreateQuizDialog } from "@/components/CreateQuizDialog";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -32,6 +33,14 @@ interface Deck {
   flashcards: { count: number }[];
 }
 
+interface Quiz {
+  id: string;
+  title: string;
+  description: string | null;
+  created_at: string;
+  questions: { count: number }[];
+}
+
 export default function TopicPage() {
   const { id } = useParams();
   const { user, loading } = useAuth();
@@ -39,6 +48,7 @@ export default function TopicPage() {
   const supabase = createClient();
   const [topic, setTopic] = useState<Topic | null>(null);
   const [decks, setDecks] = useState<Deck[]>([]);
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => {
@@ -50,11 +60,16 @@ export default function TopicPage() {
   const fetchData = useCallback(async () => {
     if (!user || !id) return;
 
-    const [topicResult, decksResult] = await Promise.all([
+    const [topicResult, decksResult, quizzesResult] = await Promise.all([
       supabase.from("topics").select("*").eq("id", id).single(),
       supabase
         .from("flashcard_decks")
         .select("*, flashcards(count)")
+        .eq("topic_id", id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("quizzes")
+        .select("*, questions(count)")
         .eq("topic_id", id)
         .order("created_at", { ascending: false }),
     ]);
@@ -70,6 +85,11 @@ export default function TopicPage() {
     if (decksResult.data) {
         // @ts-ignore
         setDecks(decksResult.data);
+    }
+
+    if (quizzesResult.data) {
+        // @ts-ignore
+        setQuizzes(quizzesResult.data);
     }
     
     setPageLoading(false);
@@ -160,19 +180,36 @@ export default function TopicPage() {
           <TabsContent value="quizzes" className="space-y-4 mt-6">
             <div className="flex justify-between items-center">
               <h2 className="text-xl font-semibold">Your Tests</h2>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Test
-              </Button>
+              <CreateQuizDialog topicId={topic.id} onQuizCreated={fetchData} />
             </div>
             
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {/* Quizzes list will go here */}
-              <Card className="bg-muted/50 border-dashed col-span-full">
-                <CardContent className="flex items-center justify-center h-[200px] text-muted-foreground p-6">
-                  No tests yet
-                </CardContent>
-              </Card>
+              {quizzes.length === 0 ? (
+                <Card className="bg-muted/50 border-dashed col-span-full">
+                  <CardContent className="flex flex-col items-center justify-center h-[200px] text-muted-foreground gap-4 p-6">
+                    <FileQuestion className="h-12 w-12 opacity-20" />
+                    <p>No tests yet. Create one to start adding questions.</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                quizzes.map((quiz) => (
+                  <Card 
+                    key={quiz.id} 
+                    className="cursor-pointer hover:shadow-md transition-shadow p-6"
+                    onClick={() => router.push(`/dashboard/quiz/${quiz.id}`)}
+                  >
+                    <CardHeader className="p-0 mb-4">
+                      <CardTitle>{quiz.title}</CardTitle>
+                      {quiz.description && <CardDescription>{quiz.description}</CardDescription>}
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <p className="text-sm text-muted-foreground">
+                        {quiz.questions?.[0]?.count || 0} questions
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
             </div>
           </TabsContent>
         </Tabs>

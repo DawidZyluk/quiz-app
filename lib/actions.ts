@@ -106,3 +106,89 @@ export async function createFlashcard(formData: FormData) {
   revalidatePath(`/dashboard/deck/${deck_id}`);
   return { success: true };
 }
+
+export async function createQuiz(formData: FormData) {
+  const supabase = await createClient();
+  const title = formData.get("title") as string;
+  const description = formData.get("description") as string;
+  const topic_id = formData.get("topic_id") as string;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase.from("quizzes").insert({
+    title,
+    description,
+    topic_id,
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${topic_id}`);
+  return { success: true };
+}
+
+interface QuestionData {
+  question_text: string;
+  question_type: 'single_choice' | 'multiple_choice';
+  quiz_id: string;
+  answers: {
+    answer_text: string;
+    is_correct: boolean;
+  }[];
+}
+
+export async function createQuestion(data: QuestionData) {
+  const supabase = await createClient();
+  const { question_text, question_type, quiz_id, answers } = data;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // 1. Create question
+  const { data: question, error: questionError } = await supabase
+    .from("questions")
+    .insert({
+      quiz_id,
+      question_text,
+      question_type,
+    })
+    .select()
+    .single();
+
+  if (questionError) {
+    return { error: questionError.message };
+  }
+
+  // 2. Create answers
+  const answersToInsert = answers.map((ans) => ({
+    question_id: question.id,
+    answer_text: ans.answer_text,
+    is_correct: ans.is_correct,
+  }));
+
+  const { error: answersError } = await supabase
+    .from("answers")
+    .insert(answersToInsert);
+
+  if (answersError) {
+    // Cleanup question if answers fail
+    await supabase.from("questions").delete().eq("id", question.id);
+    return { error: answersError.message };
+  }
+
+  revalidatePath(`/dashboard/quiz/${quiz_id}`);
+  return { success: true };
+}
