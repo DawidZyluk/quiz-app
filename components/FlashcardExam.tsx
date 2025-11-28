@@ -8,6 +8,16 @@ import { RotateCcw, X, Check, ArrowLeft } from "lucide-react";
 import { motion } from "motion/react";
 import { updateFlashcardStatus } from "@/lib/actions";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Flashcard {
   id: string;
@@ -25,6 +35,7 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
   const [isFlipped, setIsFlipped] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
   const [stats, setStats] = useState({ remembered: 0, forgotten: 0 });
+  const [showExitAlert, setShowExitAlert] = useState(false);
 
   // Reset state when flashcards change or component mounts
   useEffect(() => {
@@ -57,6 +68,19 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
     } else {
       setIsCompleted(true);
     }
+  };
+
+  const handleExitClick = () => {
+    if (isCompleted) {
+      onExit();
+    } else {
+      setShowExitAlert(true);
+    }
+  };
+
+  const confirmExit = () => {
+    setShowExitAlert(false);
+    onExit();
   };
 
   if (flashcards.length === 0) {
@@ -99,8 +123,23 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
 
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto w-full">
+      <AlertDialog open={showExitAlert} onOpenChange={setShowExitAlert}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Exit Exam?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your progress for the current session will be saved, but the exam is not completed. Are you sure you want to exit?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmExit}>Exit Exam</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center justify-between gap-4">
-        <Button variant="ghost" onClick={onExit} size="sm">
+        <Button variant="ghost" onClick={handleExitClick} size="sm">
           <ArrowLeft className="mr-2 h-4 w-4" />
           Exit Exam
         </Button>
@@ -171,4 +210,3 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
     </div>
   );
 }
-
