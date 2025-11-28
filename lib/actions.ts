@@ -50,3 +50,59 @@ export async function createTopic(formData: FormData) {
   revalidatePath("/dashboard");
   return { success: true };
 }
+
+export async function createDeck(formData: FormData) {
+  const supabase = await createClient();
+  const name = formData.get("name") as string;
+  const description = formData.get("description") as string;
+  const topic_id = formData.get("topic_id") as string;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase.from("flashcard_decks").insert({
+    name,
+    description,
+    topic_id,
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${topic_id}`);
+  return { success: true };
+}
+
+export async function createFlashcard(formData: FormData) {
+  const supabase = await createClient();
+  const question = formData.get("question") as string;
+  const answer = formData.get("answer") as string;
+  const deck_id = formData.get("deck_id") as string;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase.from("flashcards").insert({
+    question,
+    answer,
+    deck_id,
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/deck/${deck_id}`);
+  return { success: true };
+}

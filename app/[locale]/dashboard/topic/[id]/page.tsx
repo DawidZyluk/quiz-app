@@ -1,18 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, Plus, Layers } from "lucide-react";
+import { CreateDeckDialog } from "@/components/CreateDeckDialog";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 
 interface Topic {
   id: string;
   name: string;
   image_url: string | null;
+}
+
+interface Deck {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  flashcards: { count: number }[];
 }
 
 export default function TopicPage() {
@@ -21,6 +38,7 @@ export default function TopicPage() {
   const router = useRouter();
   const supabase = createClient();
   const [topic, setTopic] = useState<Topic | null>(null);
+  const [decks, setDecks] = useState<Deck[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => {
@@ -29,28 +47,37 @@ export default function TopicPage() {
     }
   }, [user, loading, router]);
 
-  useEffect(() => {
-    async function fetchTopic() {
-      if (!user || !id) return;
+  const fetchData = useCallback(async () => {
+    if (!user || !id) return;
 
-      const { data, error } = await supabase
-        .from("topics")
-        .select("*")
-        .eq("id", id)
-        .single();
+    const [topicResult, decksResult] = await Promise.all([
+      supabase.from("topics").select("*").eq("id", id).single(),
+      supabase
+        .from("flashcard_decks")
+        .select("*, flashcards(count)")
+        .eq("topic_id", id)
+        .order("created_at", { ascending: false }),
+    ]);
 
-      if (error) {
-        console.error("Error fetching topic:", error);
-        router.push("/dashboard");
-        return;
-      }
-
-      setTopic(data);
-      setPageLoading(false);
+    if (topicResult.error) {
+      console.error("Error fetching topic:", topicResult.error);
+      router.push("/dashboard");
+      return;
     }
 
-    fetchTopic();
+    setTopic(topicResult.data);
+    
+    if (decksResult.data) {
+        // @ts-ignore
+        setDecks(decksResult.data);
+    }
+    
+    setPageLoading(false);
   }, [user, id, supabase, router]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   if (loading || pageLoading) {
     return (
@@ -65,6 +92,19 @@ export default function TopicPage() {
   return (
     <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-8">
+        {/* Breadcrumbs */}
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{topic.name}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+
         {/* Header */}
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard")}>
@@ -83,20 +123,37 @@ export default function TopicPage() {
           
           <TabsContent value="flashcards" className="space-y-4 mt-6">
             <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold">Your Flashcards</h2>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Flashcard
-              </Button>
+              <h2 className="text-xl font-semibold">Your Decks</h2>
+              <CreateDeckDialog topicId={topic.id} onDeckCreated={fetchData} />
             </div>
             
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {/* Flashcards list will go here */}
-              <Card className="bg-muted/50 border-dashed">
-                <CardContent className="flex items-center justify-center h-[200px] text-muted-foreground">
-                  No flashcards yet
-                </CardContent>
-              </Card>
+              {decks.length === 0 ? (
+                <Card className="bg-muted/50 border-dashed col-span-full">
+                  <CardContent className="flex flex-col items-center justify-center h-[200px] text-muted-foreground gap-4 p-6">
+                    <Layers className="h-12 w-12 opacity-20" />
+                    <p>No flashcard decks yet. Create one to start adding flashcards.</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                decks.map((deck) => (
+                  <Card 
+                    key={deck.id} 
+                    className="cursor-pointer hover:shadow-md transition-shadow p-6"
+                    onClick={() => router.push(`/dashboard/deck/${deck.id}`)}
+                  >
+                    <CardHeader className="p-0 mb-4">
+                      <CardTitle>{deck.name}</CardTitle>
+                      {deck.description && <CardDescription>{deck.description}</CardDescription>}
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <p className="text-sm text-muted-foreground">
+                        {deck.flashcards?.[0]?.count || 0} cards
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
             </div>
           </TabsContent>
           
@@ -111,8 +168,8 @@ export default function TopicPage() {
             
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {/* Quizzes list will go here */}
-              <Card className="bg-muted/50 border-dashed">
-                <CardContent className="flex items-center justify-center h-[200px] text-muted-foreground">
+              <Card className="bg-muted/50 border-dashed col-span-full">
+                <CardContent className="flex items-center justify-center h-[200px] text-muted-foreground p-6">
                   No tests yet
                 </CardContent>
               </Card>
@@ -123,4 +180,3 @@ export default function TopicPage() {
     </div>
   );
 }
-
