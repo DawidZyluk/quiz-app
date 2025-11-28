@@ -83,7 +83,11 @@ export default function DashboardPage() {
 
           {/* Existing Topics */}
           {topics.map((topic) => (
-            <Card key={topic.id} className="overflow-hidden hover:shadow-lg transition-shadow cursor-pointer h-[200px]">
+            <Card 
+              key={topic.id} 
+              className="overflow-hidden hover:shadow-lg transition-shadow cursor-pointer h-[200px]"
+              onClick={() => router.push(`/dashboard/topic/${topic.id}`)}
+            >
               <CardContent className="p-0 h-full relative group">
                 {topic.image_url ? (
                   <img 
