@@ -35,7 +35,7 @@ export default function HeaderActions() {
     };
 
     return (
-        <header className="absolute top-0 left-0 right-0 h-16 px-4 flex items-center justify-between z-50 border-b bg-background/80 backdrop-blur-sm">
+        <header className="fixed top-0 left-0 right-0 h-16 px-4 flex items-center justify-between z-50 border-b bg-background/80 backdrop-blur-sm">
             <div className="flex items-center gap-2">
                 <h1 
                     className="text-2xl font-bold cursor-pointer bg-linear-to-r from-primary to-primary/70 bg-clip-text text-transparent" 

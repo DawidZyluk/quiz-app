@@ -46,7 +46,9 @@ export default async function RootLayout({
           >
             <AuthProvider>
                 <HeaderActions />
-                {children}
+                <main className="pt-16">
+                    {children}
+                </main>
                 <Toaster />
             </AuthProvider>
           </ThemeProvider>

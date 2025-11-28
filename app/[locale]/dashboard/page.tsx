@@ -19,7 +19,7 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
         <div className="text-lg">{tCommon("loading")}</div>
       </div>
     );
@@ -34,7 +34,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen p-4 md:p-8">
+    <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center pt-16 md:pt-0">

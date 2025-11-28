@@ -8,7 +8,7 @@ export default function Home() {
   const tDashboard = useTranslations("Dashboard");
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen gap-6 p-4 relative">
+    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-6 p-4 relative">
       <div className="text-center space-y-4">
         <h1 className="text-5xl font-bold">{t("title")}</h1>
         <p className="text-xl text-muted-foreground">
