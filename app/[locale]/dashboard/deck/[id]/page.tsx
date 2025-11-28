@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, BookOpen } from "lucide-react";
 import { CreateFlashcardDialog } from "@/components/CreateFlashcardDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -16,6 +16,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { FlashcardStudy } from "@/components/FlashcardStudy";
 
 interface Deck {
   id: string;
@@ -45,6 +46,7 @@ export default function DeckPage() {
   const [topic, setTopic] = useState<Topic | null>(null);
   const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
+  const [isStudyMode, setIsStudyMode] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -104,6 +106,17 @@ export default function DeckPage() {
 
   if (!deck) return null;
 
+  if (isStudyMode) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8 flex items-center justify-center">
+        <FlashcardStudy 
+          flashcards={flashcards} 
+          onExit={() => setIsStudyMode(false)} 
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -130,16 +143,23 @@ export default function DeckPage() {
 
         {/* Header */}
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => router.push(`/dashboard/topic/${deck.topic_id}`)}>
-              <ArrowLeft className="h-6 w-6" />
-            </Button>
-            <div>
-              <h1 className="text-3xl font-bold">{deck.name}</h1>
-              {deck.description && (
-                <p className="text-muted-foreground mt-1">{deck.description}</p>
-              )}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button variant="ghost" size="icon" onClick={() => router.push(`/dashboard/topic/${deck.topic_id}`)}>
+                <ArrowLeft className="h-6 w-6" />
+              </Button>
+              <div>
+                <h1 className="text-3xl font-bold">{deck.name}</h1>
+                {deck.description && (
+                  <p className="text-muted-foreground mt-1">{deck.description}</p>
+                )}
+              </div>
             </div>
+            
+            <Button onClick={() => setIsStudyMode(true)} disabled={flashcards.length === 0}>
+              <BookOpen className="mr-2 h-4 w-4" />
+              Study Mode
+            </Button>
           </div>
           
           <div className="flex justify-between items-center border-b pb-4">
