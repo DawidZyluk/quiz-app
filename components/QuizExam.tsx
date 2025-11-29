@@ -17,6 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { saveQuizProgress } from "@/lib/actions";
 
 interface Question {
   id: string;
@@ -64,19 +65,18 @@ export function QuizExam({ questions, onExit }: QuizExamProps) {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentIndex < questions.length - 1) {
       setCurrentIndex(prev => prev + 1);
     } else {
-      calculateScore();
-      setIsCompleted(true);
+      await finishExam();
     }
   };
 
-  const calculateScore = () => {
+  const finishExam = async () => {
     let correctCount = 0;
     
-    questions.forEach(q => {
+    for (const q of questions) {
       const selected = selectedAnswers[q.id] || [];
       const correct = q.answers.filter(a => a.is_correct).map(a => a.id);
       
@@ -85,9 +85,13 @@ export function QuizExam({ questions, onExit }: QuizExamProps) {
         selected.every(id => correct.includes(id));
         
       if (isCorrect) correctCount++;
-    });
+      
+      // Save progress for each question
+      await saveQuizProgress(q.id, isCorrect);
+    }
     
     setScore(correctCount);
+    setIsCompleted(true);
   };
 
   const handleExitClick = () => {
@@ -226,4 +230,3 @@ export function QuizExam({ questions, onExit }: QuizExamProps) {
     </div>
   );
 }
-

@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, BookOpen, GraduationCap } from "lucide-react";
+import { ArrowLeft, BookOpen, GraduationCap, Target } from "lucide-react";
 import { AddQuestionDialog } from "@/components/AddQuestionDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -42,6 +42,10 @@ interface Question {
     answer_text: string;
     is_correct: boolean;
   }[];
+  stats?: {
+    attempts: number;
+    success_rate: number;
+  };
 }
 
 export default function QuizPage() {
@@ -88,7 +92,7 @@ export default function QuizPage() {
     
     if (topicData) setTopic(topicData);
 
-    // Fetch questions and answers
+    // Fetch questions, answers and stats
     const { data: questionsData } = await supabase
       .from("questions")
       .select(`
@@ -97,9 +101,28 @@ export default function QuizPage() {
       `)
       .eq("quiz_id", id)
       .order("created_at", { ascending: true });
+
+    // Fetch stats
+    const { data: statsData } = await supabase
+      .from("user_quiz_progress")
+      .select("question_id, is_correct")
+      .eq("user_id", user.id);
     
     if (questionsData) {
-      setQuestions(questionsData as Question[]);
+      const questionsWithStats = questionsData.map((q: any) => {
+        const qStats = statsData?.filter(s => s.question_id === q.id) || [];
+        const attempts = qStats.length;
+        const correct = qStats.filter(s => s.is_correct).length;
+        
+        return {
+          ...q,
+          stats: {
+            attempts,
+            success_rate: attempts > 0 ? Math.round((correct / attempts) * 100) : 0
+          }
+        };
+      });
+      setQuestions(questionsWithStats as Question[]);
     }
     
     setPageLoading(false);
@@ -107,7 +130,7 @@ export default function QuizPage() {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, viewMode]); // Refetch when switching back from modes
 
   if (loading || pageLoading) {
     return (
@@ -217,9 +240,17 @@ export default function QuizPage() {
                       <span className="mr-2 text-muted-foreground">{index + 1}.</span>
                       {question.question_text}
                     </CardTitle>
-                    <Badge variant="outline">
-                      {question.question_type === 'single_choice' ? 'Single Choice' : 'Multiple Choice'}
-                    </Badge>
+                    <div className="flex gap-2 items-center">
+                      {question.stats && question.stats.attempts > 0 && (
+                        <Badge variant={question.stats.success_rate >= 70 ? "default" : "secondary"} className="flex gap-1">
+                          <Target className="w-3 h-3" />
+                          {question.stats.success_rate}% ({question.stats.attempts})
+                        </Badge>
+                      )}
+                      <Badge variant="outline">
+                        {question.question_type === 'single_choice' ? 'Single Choice' : 'Multiple Choice'}
+                      </Badge>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>

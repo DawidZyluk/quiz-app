@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Check, ChevronRight, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { saveQuizProgress } from "@/lib/actions";
 
 interface Question {
   id: string;
@@ -46,8 +47,16 @@ export function QuizStudy({ questions, onExit }: QuizStudyProps) {
     }
   };
 
-  const handleCheck = () => {
+  const handleCheck = async () => {
     setShowResult(true);
+    
+    // Calculate if correct
+    const correctAnswers = currentQuestion.answers.filter(a => a.is_correct).map(a => a.id);
+    const isCorrect = selectedAnswers.length === correctAnswers.length && 
+      selectedAnswers.every(id => correctAnswers.includes(id));
+      
+    // Save progress
+    await saveQuizProgress(currentQuestion.id, isCorrect);
   };
 
   const handleNext = () => {
@@ -58,11 +67,6 @@ export function QuizStudy({ questions, onExit }: QuizStudyProps) {
     } else {
       onExit();
     }
-  };
-
-  const isAnswerCorrect = (answerId: string) => {
-    const answer = currentQuestion.answers.find(a => a.id === answerId);
-    return answer?.is_correct;
   };
 
   if (questions.length === 0) {
@@ -166,4 +170,3 @@ export function QuizStudy({ questions, onExit }: QuizStudyProps) {
     </div>
   );
 }
-

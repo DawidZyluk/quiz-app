@@ -259,3 +259,28 @@ export async function resetDeckProgress(deckId: string) {
   revalidatePath(`/dashboard/deck/${deckId}`);
   return { success: true };
 }
+
+export async function saveQuizProgress(questionId: string, isCorrect: boolean) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase
+    .from("user_quiz_progress")
+    .insert({
+      user_id: user.id,
+      question_id: questionId,
+      is_correct: isCorrect,
+    });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { success: true };
+}
