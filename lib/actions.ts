@@ -203,6 +203,17 @@ export async function updateFlashcardStatus(flashcardId: string, status: 'rememb
     return { error: "Unauthorized" };
   }
 
+  // Get current progress to increment counts
+  const { data: currentProgress } = await supabase
+    .from("user_flashcard_progress")
+    .select("remembered_count, forgotten_count")
+    .eq("user_id", user.id)
+    .eq("flashcard_id", flashcardId)
+    .single();
+
+  const rememberedCount = (currentProgress?.remembered_count || 0) + (status === 'remembered' ? 1 : 0);
+  const forgottenCount = (currentProgress?.forgotten_count || 0) + (status === 'forgotten' ? 1 : 0);
+
   const { error } = await supabase
     .from("user_flashcard_progress")
     .upsert(
@@ -211,6 +222,8 @@ export async function updateFlashcardStatus(flashcardId: string, status: 'rememb
         flashcard_id: flashcardId,
         status,
         last_reviewed_at: new Date().toISOString(),
+        remembered_count: rememberedCount,
+        forgotten_count: forgottenCount,
       },
       { onConflict: "user_id, flashcard_id" }
     );
@@ -320,6 +333,186 @@ export async function resetQuizProgress(quizId: string) {
   }
 
   revalidatePath(`/dashboard/quiz/${quizId}`);
+  return { success: true };
+}
+
+export async function updateDeck(deckId: string, formData: FormData) {
+  const supabase = await createClient();
+  const name = formData.get("name") as string;
+  const description = formData.get("description") as string;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify deck ownership through topic
+  const { data: deck, error: fetchError } = await supabase
+    .from("flashcard_decks")
+    .select("topic_id, topics!inner(user_id)")
+    .eq("id", deckId)
+    .single();
+
+  if (fetchError || !deck) {
+    return { error: "Deck not found" };
+  }
+
+  // @ts-ignore
+  if (deck.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase
+    .from("flashcard_decks")
+    .update({
+      name,
+      description: description || null,
+    })
+    .eq("id", deckId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${deck.topic_id}`);
+  revalidatePath(`/dashboard/deck/${deckId}`);
+  return { success: true };
+}
+
+export async function deleteDeck(deckId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Get deck to check ownership and get topic_id
+  const { data: deck, error: fetchError } = await supabase
+    .from("flashcard_decks")
+    .select("topic_id, topics!inner(user_id)")
+    .eq("id", deckId)
+    .single();
+
+  if (fetchError || !deck) {
+    return { error: "Deck not found" };
+  }
+
+  // @ts-ignore
+  if (deck.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const topicId = deck.topic_id;
+
+  // Delete deck (cascade will handle related flashcards and progress)
+  const { error } = await supabase
+    .from("flashcard_decks")
+    .delete()
+    .eq("id", deckId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${topicId}`);
+  return { success: true };
+}
+
+export async function updateFlashcard(flashcardId: string, formData: FormData) {
+  const supabase = await createClient();
+  const question = formData.get("question") as string;
+  const answer = formData.get("answer") as string;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify flashcard ownership through deck -> topic
+  const { data: flashcard, error: fetchError } = await supabase
+    .from("flashcards")
+    .select("deck_id, flashcard_decks!inner(topic_id, topics!inner(user_id))")
+    .eq("id", flashcardId)
+    .single();
+
+  if (fetchError || !flashcard) {
+    return { error: "Flashcard not found" };
+  }
+
+  // @ts-ignore
+  if (flashcard.flashcard_decks.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase
+    .from("flashcards")
+    .update({
+      question,
+      answer,
+    })
+    .eq("id", flashcardId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  // @ts-ignore
+  const deckId = flashcard.deck_id;
+  revalidatePath(`/dashboard/deck/${deckId}`);
+  revalidatePath(`/dashboard/deck/${deckId}/flashcards`);
+  return { success: true };
+}
+
+export async function deleteFlashcard(flashcardId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Get flashcard to check ownership and get deck_id
+  const { data: flashcard, error: fetchError } = await supabase
+    .from("flashcards")
+    .select("deck_id, flashcard_decks!inner(topic_id, topics!inner(user_id))")
+    .eq("id", flashcardId)
+    .single();
+
+  if (fetchError || !flashcard) {
+    return { error: "Flashcard not found" };
+  }
+
+  // @ts-ignore
+  if (flashcard.flashcard_decks.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // @ts-ignore
+  const deckId = flashcard.deck_id;
+
+  // Delete flashcard (cascade will handle related progress)
+  const { error } = await supabase
+    .from("flashcards")
+    .delete()
+    .eq("id", flashcardId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/deck/${deckId}`);
+  revalidatePath(`/dashboard/deck/${deckId}/flashcards`);
   return { success: true };
 }
 

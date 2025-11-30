@@ -68,6 +68,59 @@ export async function seedData() {
     if (flashcardsError) throw flashcardsError;
     console.log(`Created ${flashcards.length} flashcards`);
 
+    // 3.5. Add some progress data to simulate learning in progress
+    const { data: insertedFlashcards } = await supabase
+      .from("flashcards")
+      .select("id")
+      .eq("deck_id", deck.id)
+      .order("created_at", { ascending: true });
+
+    if (insertedFlashcards && insertedFlashcards.length > 0) {
+      // First 3 flashcards - user remembered them
+      for (let i = 0; i < Math.min(3, insertedFlashcards.length); i++) {
+        await supabase
+          .from("user_flashcard_progress")
+          .upsert({
+            user_id: user.id,
+            flashcard_id: insertedFlashcards[i].id,
+            status: 'remembered',
+            remembered_count: 2,
+            forgotten_count: 1,
+            last_reviewed_at: new Date(Date.now() - (i * 86400000)).toISOString(), // Different dates
+          }, { onConflict: "user_id, flashcard_id" });
+      }
+
+      // Next 2 flashcards - user forgot them
+      for (let i = 3; i < Math.min(5, insertedFlashcards.length); i++) {
+        await supabase
+          .from("user_flashcard_progress")
+          .upsert({
+            user_id: user.id,
+            flashcard_id: insertedFlashcards[i].id,
+            status: 'forgotten',
+            remembered_count: 0,
+            forgotten_count: 3,
+            last_reviewed_at: new Date(Date.now() - ((i - 3) * 86400000)).toISOString(),
+          }, { onConflict: "user_id, flashcard_id" });
+      }
+
+      // One more - mixed results
+      if (insertedFlashcards.length > 5) {
+        await supabase
+          .from("user_flashcard_progress")
+          .upsert({
+            user_id: user.id,
+            flashcard_id: insertedFlashcards[5].id,
+            status: 'remembered',
+            remembered_count: 4,
+            forgotten_count: 2,
+            last_reviewed_at: new Date().toISOString(),
+          }, { onConflict: "user_id, flashcard_id" });
+      }
+    }
+
+    console.log("Added progress data to flashcards");
+
     // 4. Create a Quiz
     const { data: quiz, error: quizError } = await supabase
       .from("quizzes")

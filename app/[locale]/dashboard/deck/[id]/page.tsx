@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,7 @@ interface ProgressStats {
 
 export default function DeckPage() {
   const { id } = useParams();
+  const searchParams = useSearchParams();
   const { user, loading } = useAuth();
   const router = useRouter();
   const supabase = createClient();
@@ -58,6 +59,14 @@ export default function DeckPage() {
   const [stats, setStats] = useState<ProgressStats>({ total: 0, remembered: 0, forgotten: 0, neutral: 0 });
   const [pageLoading, setPageLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'list' | 'study' | 'exam'>('list');
+
+  // Check for mode in query params
+  useEffect(() => {
+    const mode = searchParams.get('mode');
+    if (mode === 'study' || mode === 'exam') {
+      setViewMode(mode);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!loading && !user) {
