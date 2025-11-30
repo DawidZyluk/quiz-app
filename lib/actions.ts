@@ -322,3 +322,138 @@ export async function resetQuizProgress(quizId: string) {
   revalidatePath(`/dashboard/quiz/${quizId}`);
   return { success: true };
 }
+
+export async function updateTopic(topicId: string, formData: FormData) {
+  const supabase = await createClient();
+  const name = formData.get("name") as string;
+  const imageFile = formData.get("image") as File | null;
+  let image_url = formData.get("image_url") as string | null;
+  const removeImage = formData.get("remove_image") === "true";
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify topic ownership
+  const { data: topic, error: fetchError } = await supabase
+    .from("topics")
+    .select("image_url, user_id")
+    .eq("id", topicId)
+    .single();
+
+  if (fetchError || !topic) {
+    return { error: "Topic not found" };
+  }
+
+  if (topic.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // Handle file upload if a file is provided
+  if (imageFile && imageFile.size > 0) {
+    // Delete old image if it exists and is in storage
+    if (topic.image_url && topic.image_url.includes('/storage/v1/object/public/topics/')) {
+      const oldFileName = topic.image_url.split('/topics/')[1];
+      if (oldFileName) {
+        await supabase.storage.from('topics').remove([oldFileName]);
+      }
+    }
+
+    const fileExt = imageFile.name.split('.').pop();
+    const fileName = `${user.id}/${Math.random().toString(36).substring(2)}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('topics')
+      .upload(fileName, imageFile);
+
+    if (uploadError) {
+      return { error: "Failed to upload image: " + uploadError.message };
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('topics')
+      .getPublicUrl(fileName);
+      
+    image_url = publicUrl;
+  } else if (removeImage) {
+    // Delete old image from storage if it exists
+    if (topic.image_url && topic.image_url.includes('/storage/v1/object/public/topics/')) {
+      const oldFileName = topic.image_url.split('/topics/')[1];
+      if (oldFileName) {
+        await supabase.storage.from('topics').remove([oldFileName]);
+      }
+    }
+    image_url = null;
+  } else if (!image_url) {
+    // Keep existing image_url if no new image provided
+    image_url = topic.image_url;
+  }
+
+  const { error } = await supabase
+    .from("topics")
+    .update({
+      name,
+      image_url,
+    })
+    .eq("id", topicId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/dashboard");
+  return { success: true };
+}
+
+export async function deleteTopic(topicId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Get topic to check ownership and get image_url
+  const { data: topic, error: fetchError } = await supabase
+    .from("topics")
+    .select("image_url, user_id")
+    .eq("id", topicId)
+    .single();
+
+  if (fetchError || !topic) {
+    return { error: "Topic not found" };
+  }
+
+  if (topic.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // Delete image from storage if it exists
+  if (topic.image_url && topic.image_url.includes('/storage/v1/object/public/topics/')) {
+    const fileName = topic.image_url.split('/topics/')[1];
+    if (fileName) {
+      await supabase.storage.from('topics').remove([fileName]);
+    }
+  }
+
+  // Delete topic (cascade will handle related quizzes, decks, etc.)
+  const { error } = await supabase
+    .from("topics")
+    .delete()
+    .eq("id", topicId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/dashboard");
+  return { success: true };
+}
