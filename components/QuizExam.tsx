@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ArrowLeft, Check, ChevronRight } from "lucide-react";
+import { ArrowLeft, CheckSquare, Square, Circle, CircleDot, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -199,6 +199,7 @@ export function QuizExam({ questions, onExit }: QuizExamProps) {
             <div className="space-y-3 pr-4">
               {currentQuestion.answers.map((answer) => {
                 const isSelected = (selectedAnswers[currentQuestion.id] || []).includes(answer.id);
+                const isMultiple = currentQuestion.question_type === 'multiple_choice';
                 
                 return (
                   <Button
@@ -207,10 +208,22 @@ export function QuizExam({ questions, onExit }: QuizExamProps) {
                     className={`w-full justify-start text-left h-auto min-h-[3rem] whitespace-normal p-4 ${isSelected ? "border-primary" : ""}`}
                     onClick={() => handleAnswerSelect(answer.id)}
                   >
-                    {isSelected && <Check className="mr-2 h-4 w-4 shrink-0" />}
-                    <span className={isSelected ? "" : "pl-6"}>{answer.answer_text}</span>
+                    {isMultiple ? (
+                      isSelected ? (
+                        <CheckSquare className="mr-2 h-5 w-5 shrink-0" />
+                      ) : (
+                        <Square className="mr-2 h-5 w-5 shrink-0" />
+                      )
+                    ) : (
+                      isSelected ? (
+                        <CircleDot className="mr-2 h-5 w-5 shrink-0" />
+                      ) : (
+                        <Circle className="mr-2 h-5 w-5 shrink-0" />
+                      )
+                    )}
+                    <span className="pl-2">{answer.answer_text}</span>
                   </Button>
-                );
+                ); 
               })}
             </div>
           </ScrollArea>

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ArrowLeft, Check, ChevronRight, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, X, Circle, CircleDot, Square, CheckSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { saveQuizProgress } from "@/lib/actions";
@@ -107,6 +107,7 @@ export function QuizStudy({ questions, onExit }: QuizStudyProps) {
             <div className="space-y-3 pr-4">
               {currentQuestion.answers.map((answer) => {
                 const isSelected = selectedAnswers.includes(answer.id);
+                const isMultiple = currentQuestion.question_type === 'multiple_choice';
                 let variant = "outline";
                 let className = "w-full justify-between text-left h-auto min-h-[3rem] whitespace-normal p-4";
                 
@@ -133,7 +134,22 @@ export function QuizStudy({ questions, onExit }: QuizStudyProps) {
                     onClick={() => handleAnswerSelect(answer.id)}
                     disabled={showResult}
                   >
-                    <span className="flex-1">{answer.answer_text}</span>
+                    <div className="flex items-center">
+                       {isMultiple ? (
+                          isSelected ? (
+                            <CheckSquare className="mr-2 h-5 w-5 shrink-0" />
+                          ) : (
+                            <Square className="mr-2 h-5 w-5 shrink-0" />
+                          )
+                        ) : (
+                          isSelected ? (
+                            <CircleDot className="mr-2 h-5 w-5 shrink-0" />
+                          ) : (
+                            <Circle className="mr-2 h-5 w-5 shrink-0" />
+                          )
+                        )}
+                      <span className="flex-1 pl-2">{answer.answer_text}</span>
+                    </div>
                     {showResult && (
                       <span className="ml-2">
                         {answer.is_correct ? (

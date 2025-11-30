@@ -284,3 +284,41 @@ export async function saveQuizProgress(questionId: string, isCorrect: boolean) {
 
   return { success: true };
 }
+
+export async function resetQuizProgress(quizId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Find all questions in the quiz
+  const { data: questions, error: fetchError } = await supabase
+    .from("questions")
+    .select("id")
+    .eq("quiz_id", quizId);
+
+  if (fetchError) {
+    return { error: fetchError.message };
+  }
+
+  const questionIds = questions.map((q) => q.id);
+
+  if (questionIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("user_quiz_progress")
+      .delete()
+      .eq("user_id", user.id)
+      .in("question_id", questionIds);
+
+    if (deleteError) {
+      return { error: deleteError.message };
+    }
+  }
+
+  revalidatePath(`/dashboard/quiz/${quizId}`);
+  return { success: true };
+}

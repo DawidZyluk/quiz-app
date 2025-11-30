@@ -5,9 +5,20 @@ import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, BookOpen, GraduationCap, Target } from "lucide-react";
+import { ArrowLeft, BookOpen, GraduationCap, Target, RotateCcw } from "lucide-react";
 import { AddQuestionDialog } from "@/components/AddQuestionDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { resetQuizProgress } from "@/lib/actions";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -58,6 +69,8 @@ export default function QuizPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'list' | 'study' | 'exam'>('list');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [showResetAlert, setShowResetAlert] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -128,6 +141,19 @@ export default function QuizPage() {
     setPageLoading(false);
   }, [user, id, supabase, router]);
 
+  const handleResetStats = async () => {
+    setShowResetAlert(false);
+    setResetLoading(true);
+    const result = await resetQuizProgress(id as string);
+    setResetLoading(false);
+    
+    if (result.error) {
+      alert("Failed to reset statistics: " + result.error);
+    } else {
+      fetchData();
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, [fetchData, viewMode]); // Refetch when switching back from modes
@@ -167,6 +193,23 @@ export default function QuizPage() {
   return (
     <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-8">
+        <AlertDialog open={showResetAlert} onOpenChange={setShowResetAlert}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reset Quiz Statistics?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete all your progress and history for this quiz.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleResetStats} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Reset Statistics
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         {/* Breadcrumbs */}
         <Breadcrumb>
           <BreadcrumbList>
@@ -204,6 +247,14 @@ export default function QuizPage() {
             </div>
 
             <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => setShowResetAlert(true)}
+                disabled={resetLoading || questions.length === 0}
+              >
+                <RotateCcw className={`mr-2 h-4 w-4 ${resetLoading ? 'animate-spin' : ''}`} />
+                Reset Stats
+              </Button>
               <Button onClick={() => setViewMode('study')} disabled={questions.length === 0} variant="outline">
                 <BookOpen className="mr-2 h-4 w-4" />
                 Study Mode
