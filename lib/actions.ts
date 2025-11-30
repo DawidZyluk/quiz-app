@@ -193,6 +193,113 @@ export async function createQuestion(data: QuestionData) {
   return { success: true };
 }
 
+export async function updateQuestion(questionId: string, data: QuestionData) {
+  const supabase = await createClient();
+  const { question_text, question_type, quiz_id, answers } = data;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify ownership through quiz -> topic
+  const { data: question, error: fetchError } = await supabase
+    .from("questions")
+    .select("quiz_id, quizzes!inner(topic_id, topics!inner(user_id))")
+    .eq("id", questionId)
+    .single();
+
+  if (fetchError || !question) {
+    return { error: "Question not found" };
+  }
+
+  // @ts-ignore
+  if (question.quizzes.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // Update question
+  const { error: updateError } = await supabase
+    .from("questions")
+    .update({
+      question_text,
+      question_type,
+    })
+    .eq("id", questionId);
+
+  if (updateError) {
+    return { error: updateError.message };
+  }
+
+  // Delete old answers and insert new ones
+  await supabase.from("answers").delete().eq("question_id", questionId);
+
+  const answersToInsert = answers.map((ans) => ({
+    question_id: questionId,
+    answer_text: ans.answer_text,
+    is_correct: ans.is_correct,
+  }));
+
+  const { error: answersError } = await supabase
+    .from("answers")
+    .insert(answersToInsert);
+
+  if (answersError) {
+    return { error: answersError.message };
+  }
+
+  revalidatePath(`/dashboard/quiz/${quiz_id}`);
+  revalidatePath(`/dashboard/quiz/${quiz_id}/questions`);
+  return { success: true };
+}
+
+export async function deleteQuestion(questionId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Get question to check ownership and get quiz_id
+  const { data: question, error: fetchError } = await supabase
+    .from("questions")
+    .select("quiz_id, quizzes!inner(topic_id, topics!inner(user_id))")
+    .eq("id", questionId)
+    .single();
+
+  if (fetchError || !question) {
+    return { error: "Question not found" };
+  }
+
+  // @ts-ignore
+  if (question.quizzes.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // @ts-ignore
+  const quizId = question.quiz_id;
+
+  // Delete question (cascade will handle related answers and progress)
+  const { error } = await supabase
+    .from("questions")
+    .delete()
+    .eq("id", questionId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/quiz/${quizId}`);
+  revalidatePath(`/dashboard/quiz/${quizId}/questions`);
+  return { success: true };
+}
+
 export async function updateFlashcardStatus(flashcardId: string, status: 'remembered' | 'forgotten') {
   const supabase = await createClient();
   const {
@@ -378,6 +485,94 @@ export async function resetQuizProgress(quizId: string) {
   }
 
   revalidatePath(`/dashboard/quiz/${quizId}`);
+  return { success: true };
+}
+
+export async function updateQuiz(quizId: string, formData: FormData) {
+  const supabase = await createClient();
+  const title = formData.get("title") as string;
+  const description = formData.get("description") as string;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify quiz ownership through topic
+  const { data: quiz, error: fetchError } = await supabase
+    .from("quizzes")
+    .select("topic_id, topics!inner(user_id)")
+    .eq("id", quizId)
+    .single();
+
+  if (fetchError || !quiz) {
+    return { error: "Quiz not found" };
+  }
+
+  // @ts-ignore
+  if (quiz.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase
+    .from("quizzes")
+    .update({
+      title,
+      description: description || null,
+    })
+    .eq("id", quizId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${quiz.topic_id}`);
+  revalidatePath(`/dashboard/quiz/${quizId}`);
+  return { success: true };
+}
+
+export async function deleteQuiz(quizId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify quiz ownership through topic
+  const { data: quiz, error: fetchError } = await supabase
+    .from("quizzes")
+    .select("topic_id, topics!inner(user_id)")
+    .eq("id", quizId)
+    .single();
+
+  if (fetchError || !quiz) {
+    return { error: "Quiz not found" };
+  }
+
+  // @ts-ignore
+  if (quiz.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const topicId = quiz.topic_id;
+
+  // Delete quiz (cascade will handle related questions, answers, and progress)
+  const { error } = await supabase
+    .from("quizzes")
+    .delete()
+    .eq("id", quizId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${topicId}`);
   return { success: true };
 }
 
