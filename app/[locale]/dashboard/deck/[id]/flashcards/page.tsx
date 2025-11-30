@@ -315,7 +315,7 @@ export default function FlashcardsListPage() {
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={() => router.push(`/dashboard/topic/${deck.topic_id}`)}>
+              <Button variant="ghost" size="icon" onClick={() => router.push(`/dashboard/topic/${deck.topic_id}?tab=flashcards`)}>
                 <ArrowLeft className="h-6 w-6" />
               </Button>
               <div>

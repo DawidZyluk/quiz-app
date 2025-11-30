@@ -93,7 +93,7 @@ export default function DeckPage() {
           flashcards={flashcards} 
           onExit={() => {
             if (topicId) {
-              router.push(`/dashboard/topic/${topicId}`);
+              router.push(`/dashboard/topic/${topicId}?tab=flashcards`);
             } else {
               router.push("/dashboard");
             }
@@ -110,7 +110,7 @@ export default function DeckPage() {
           flashcards={flashcards} 
           onExit={() => {
             if (topicId) {
-              router.push(`/dashboard/topic/${topicId}`);
+              router.push(`/dashboard/topic/${topicId}?tab=flashcards`);
             } else {
               router.push("/dashboard");
             }
