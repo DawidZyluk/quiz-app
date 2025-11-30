@@ -203,28 +203,73 @@ export async function updateFlashcardStatus(flashcardId: string, status: 'rememb
     return { error: "Unauthorized" };
   }
 
-  // Get current progress to increment counts
-  const { data: currentProgress } = await supabase
+  // First, try to get current progress with counts
+  let currentRemembered = 0;
+  let currentForgotten = 0;
+  let hasCountColumns = true;
+
+  const { data: currentProgress, error: fetchError } = await supabase
     .from("user_flashcard_progress")
     .select("remembered_count, forgotten_count")
     .eq("user_id", user.id)
     .eq("flashcard_id", flashcardId)
-    .single();
+    .maybeSingle();
 
-  const rememberedCount = (currentProgress?.remembered_count || 0) + (status === 'remembered' ? 1 : 0);
-  const forgottenCount = (currentProgress?.forgotten_count || 0) + (status === 'forgotten' ? 1 : 0);
+  // Check if columns exist - if error is about column, they don't exist
+  if (fetchError) {
+    if (fetchError.code === '42703' || fetchError.message?.includes('column')) {
+      hasCountColumns = false;
+    } else if (fetchError.code !== 'PGRST116') {
+      // PGRST116 is "not found" which is fine
+      console.warn("Warning fetching progress:", fetchError);
+    }
+  } else if (currentProgress) {
+    currentRemembered = currentProgress.remembered_count ?? 0;
+    currentForgotten = currentProgress.forgotten_count ?? 0;
+  }
 
+  // Calculate counts
+  const rememberedCount = currentRemembered + (status === 'remembered' ? 1 : 0);
+  const forgottenCount = currentForgotten + (status === 'forgotten' ? 1 : 0);
+
+  // Build base upsert data
+  const baseData = {
+    user_id: user.id,
+    flashcard_id: flashcardId,
+    status,
+    last_reviewed_at: new Date().toISOString(),
+  };
+
+  // Try with counts first if columns exist
+  if (hasCountColumns) {
+    const { error } = await supabase
+      .from("user_flashcard_progress")
+      .upsert(
+        {
+          ...baseData,
+          remembered_count: rememberedCount,
+          forgotten_count: forgottenCount,
+        },
+        { onConflict: "user_id, flashcard_id" }
+      );
+
+    if (error) {
+      // If it's a column error, retry without counts
+      if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('remembered_count') || error.message?.includes('forgotten_count')) {
+        hasCountColumns = false;
+      } else {
+        return { error: error.message };
+      }
+    } else {
+      return { success: true };
+    }
+  }
+
+  // Fallback: upsert without count columns
   const { error } = await supabase
     .from("user_flashcard_progress")
     .upsert(
-      {
-        user_id: user.id,
-        flashcard_id: flashcardId,
-        status,
-        last_reviewed_at: new Date().toISOString(),
-        remembered_count: rememberedCount,
-        forgotten_count: forgottenCount,
-      },
+      baseData,
       { onConflict: "user_id, flashcard_id" }
     );
 
@@ -333,6 +378,44 @@ export async function resetQuizProgress(quizId: string) {
   }
 
   revalidatePath(`/dashboard/quiz/${quizId}`);
+  return { success: true };
+}
+
+export async function resetFlashcardProgress(deckId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Find all flashcards in the deck
+  const { data: flashcards, error: fetchError } = await supabase
+    .from("flashcards")
+    .select("id")
+    .eq("deck_id", deckId);
+
+  if (fetchError) {
+    return { error: fetchError.message };
+  }
+
+  const flashcardIds = flashcards.map((f) => f.id);
+
+  if (flashcardIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("user_flashcard_progress")
+      .delete()
+      .eq("user_id", user.id)
+      .in("flashcard_id", flashcardIds);
+
+    if (deleteError) {
+      return { error: deleteError.message };
+    }
+  }
+
+  revalidatePath(`/dashboard/deck/${deckId}/flashcards`);
   return { success: true };
 }
 

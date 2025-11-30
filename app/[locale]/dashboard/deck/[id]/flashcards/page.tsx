@@ -5,10 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Plus, Edit, Trash2, Target, X } from "lucide-react";
+import { ArrowLeft, Plus, Edit, Trash2, Target, X, Check, RotateCcw } from "lucide-react";
 import { CreateFlashcardDialog } from "@/components/CreateFlashcardDialog";
 import { EditFlashcardDialog } from "@/components/EditFlashcardDialog";
-import { deleteFlashcard } from "@/lib/actions";
+import { deleteFlashcard, resetFlashcardProgress } from "@/lib/actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Breadcrumb,
@@ -76,6 +76,8 @@ export default function FlashcardsListPage() {
   const [editingFlashcard, setEditingFlashcard] = useState<Flashcard | null>(null);
   const [deletingFlashcard, setDeletingFlashcard] = useState<Flashcard | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [showResetAlert, setShowResetAlert] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -110,47 +112,108 @@ export default function FlashcardsListPage() {
     
     if (topicData) setTopic(topicData);
 
-    // Fetch flashcards with progress stats
+    // Fetch flashcards
     const { data: flashcardsData } = await supabase
       .from("flashcards")
       .select("*")
       .eq("deck_id", id)
       .order("created_at", { ascending: true });
 
-    // Fetch progress stats with counts
-    const { data: progressData } = await supabase
+    if (!flashcardsData || flashcardsData.length === 0) {
+      setFlashcards([]);
+      setPageLoading(false);
+      return;
+    }
+
+    // Fetch progress stats with counts for flashcards in this deck
+    const flashcardIds = flashcardsData.map((f: any) => f.id);
+    
+    // Try to fetch with count columns first
+    let progressData: any[] | null = null;
+    let hasCountColumns = true;
+    
+    const { data: progressDataWithCounts, error: progressErrorWithCounts } = await supabase
       .from("user_flashcard_progress")
       .select("flashcard_id, status, last_reviewed_at, remembered_count, forgotten_count")
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .in("flashcard_id", flashcardIds);
 
-    if (flashcardsData) {
-      const progressMap = new Map(
-        progressData?.map((p: any) => {
-          const rememberedCount = p.remembered_count ?? 0;
-          const forgottenCount = p.forgotten_count ?? 0;
-          return [p.flashcard_id, { 
-            status: p.status, 
-            last_reviewed_at: p.last_reviewed_at,
-            remembered_count: rememberedCount,
-            forgotten_count: forgottenCount,
-            total_reviews: rememberedCount + forgottenCount
-          }];
-        })
-      );
-
-      const flashcardsWithStats = flashcardsData.map((card: any) => ({
-        ...card,
-        stats: progressMap.get(card.id) || { 
-          status: null, 
-          last_reviewed_at: null,
-          remembered_count: 0,
-          forgotten_count: 0,
-          total_reviews: 0
+    // If error, try without count columns (migration might not be run)
+    if (progressErrorWithCounts) {
+      const errorMessage = progressErrorWithCounts.message || JSON.stringify(progressErrorWithCounts);
+      const isColumnError = progressErrorWithCounts.code === '42703' || 
+                           errorMessage.toLowerCase().includes('column') ||
+                           errorMessage.includes('remembered_count') ||
+                           errorMessage.includes('forgotten_count');
+      
+      if (isColumnError) {
+        console.warn("Count columns don't exist - migration may not be run. Using fallback mode.");
+        hasCountColumns = false;
+        
+        // Try without count columns
+        const { data: progressDataWithoutCounts, error: progressErrorWithoutCounts } = await supabase
+          .from("user_flashcard_progress")
+          .select("flashcard_id, status, last_reviewed_at")
+          .eq("user_id", user.id)
+          .in("flashcard_id", flashcardIds);
+        
+        if (progressErrorWithoutCounts) {
+          console.error("Error fetching progress:", progressErrorWithoutCounts);
+          progressData = null;
+        } else {
+          progressData = progressDataWithoutCounts;
         }
-      }));
-
-      setFlashcards(flashcardsWithStats);
+      } else {
+        console.error("Error fetching progress:", progressErrorWithCounts);
+        progressData = null;
+      }
+    } else {
+      progressData = progressDataWithCounts;
     }
+
+    // Create a map of flashcard_id -> progress stats
+    const progressMap = new Map(
+      (progressData || []).map((p: any) => {
+        // Handle null/undefined values - convert to numbers
+        // If columns don't exist, calculate from status
+        let rememberedCount = 0;
+        let forgottenCount = 0;
+        
+        if (hasCountColumns) {
+          rememberedCount = p.remembered_count != null ? Number(p.remembered_count) : 0;
+          forgottenCount = p.forgotten_count != null ? Number(p.forgotten_count) : 0;
+        } else {
+          // Fallback: if no count columns, use status to infer counts
+          if (p.status === 'remembered') {
+            rememberedCount = 1;
+          } else if (p.status === 'forgotten') {
+            forgottenCount = 1;
+          }
+        }
+        
+        return [p.flashcard_id, { 
+          status: p.status, 
+          last_reviewed_at: p.last_reviewed_at,
+          remembered_count: rememberedCount,
+          forgotten_count: forgottenCount,
+          total_reviews: rememberedCount + forgottenCount
+        }];
+      })
+    );
+
+    // Combine flashcards with their stats
+    const flashcardsWithStats = flashcardsData.map((card: any) => ({
+      ...card,
+      stats: progressMap.get(card.id) || { 
+        status: null, 
+        last_reviewed_at: null,
+        remembered_count: 0,
+        forgotten_count: 0,
+        total_reviews: 0
+      }
+    }));
+
+    setFlashcards(flashcardsWithStats);
     
     setPageLoading(false);
   }, [user, id, supabase, router]);
@@ -178,6 +241,25 @@ export default function FlashcardsListPage() {
     }
   };
 
+  const handleResetStats = async () => {
+    if (!id) return;
+    
+    setShowResetAlert(false);
+    setResetLoading(true);
+    try {
+      const result = await resetFlashcardProgress(id as string);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      toast.success("Statistics reset successfully!");
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || "Error resetting statistics");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   if (loading || pageLoading) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
@@ -191,6 +273,23 @@ export default function FlashcardsListPage() {
   return (
     <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-8">
+        <AlertDialog open={showResetAlert} onOpenChange={setShowResetAlert}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reset Flashcard Statistics?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete all your progress and statistics for all flashcards in this deck.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleResetStats} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Reset Statistics
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         {/* Breadcrumbs */}
         <Breadcrumb>
           <BreadcrumbList>
@@ -232,7 +331,18 @@ export default function FlashcardsListPage() {
             <p className="text-muted-foreground">
               {flashcards.length} flashcards
             </p>
-            <CreateFlashcardDialog deckId={deck.id} onFlashcardCreated={fetchData} />
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowResetAlert(true)}
+                disabled={resetLoading}
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                {resetLoading ? "Resetting..." : "Reset Stats"}
+              </Button>
+              <CreateFlashcardDialog deckId={deck.id} onFlashcardCreated={fetchData} />
+            </div>
           </div>
         </div>
 
@@ -257,25 +367,27 @@ export default function FlashcardsListPage() {
                       <p className="text-sm whitespace-pre-wrap break-words text-center">{flashcard.answer}</p>
                     </div>
                   </div>
-                  {flashcard.stats && flashcard.stats.total_reviews > 0 && (
-                    <div className="flex items-center gap-3 mt-3 pt-3 border-t text-xs text-muted-foreground flex-wrap">
-                      <span className="flex items-center gap-1">
-                        <Target className="w-3 h-3 text-green-600 dark:text-green-400" />
-                        <span className="text-green-600 dark:text-green-400 font-medium">
-                          {flashcard.stats.remembered_count}
+                  <div className="mt-3 pt-3 border-t">
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
+                          <span className="text-green-600 dark:text-green-400 font-medium">
+                            {flashcard.stats?.remembered_count ?? 0}
+                          </span>
                         </span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <X className="w-3 h-3 text-red-600 dark:text-red-400" />
-                        <span className="text-red-600 dark:text-red-400 font-medium">
-                          {flashcard.stats.forgotten_count}
+                        <span className="flex items-center gap-1">
+                          <X className="w-3 h-3 text-red-600 dark:text-red-400" />
+                          <span className="text-red-600 dark:text-red-400 font-medium">
+                            {flashcard.stats?.forgotten_count ?? 0}
+                          </span>
                         </span>
-                      </span>
-                      <span className="text-muted-foreground ml-auto">
-                        {flashcard.stats.total_reviews}
+                      </div>
+                      <span className="text-muted-foreground font-medium">
+                        {flashcard.stats?.total_reviews ?? 0} reviews
                       </span>
                     </div>
-                  )}
+                  </div>
                 </CardContent>
                 <div className="absolute top-2 right-2">
                   <div className="flex items-center gap-1">
