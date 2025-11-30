@@ -310,15 +310,59 @@ export async function updateFlashcardStatus(flashcardId: string, status: 'rememb
     return { error: "Unauthorized" };
   }
 
-  // First, try to get current progress with counts
-  let currentRemembered = 0;
-  let currentForgotten = 0;
-  let hasCountColumns = true;
+  // In exam mode, each time user rates a flashcard, we increment the appropriate counter
+  // If status is 'remembered', increment remembered_count by 1, leave forgotten_count unchanged
+  // If status is 'forgotten', increment forgotten_count by 1, leave remembered_count unchanged
+  // This allows tracking total attempts: total_reviews = remembered_count + forgotten_count
+  const rememberedIncrement = status === 'remembered' ? 1 : 0;  // Add 1 to remembered_count if remembered
+  const forgottenIncrement = status === 'forgotten' ? 1 : 0;    // Add 1 to forgotten_count if forgotten
 
+  // Try to use atomic RPC function first
+  const { error: rpcError } = await supabase.rpc('increment_flashcard_counts', {
+    p_user_id: user.id,
+    p_flashcard_id: flashcardId,
+    p_status: status,
+    p_remembered_increment: rememberedIncrement,  // How much to add to remembered_count (0 or 1)
+    p_forgotten_increment: forgottenIncrement,    // How much to add to forgotten_count (0 or 1)
+  });
+
+  // If RPC function doesn't exist or fails, fall back to manual increment
+  if (rpcError) {
+    const errorCode = rpcError.code || '';
+    const errorMessage = rpcError.message || '';
+    const isFunctionNotFound = errorCode === '42883' || 
+                               errorMessage.includes('function') || 
+                               errorMessage.includes('does not exist') ||
+                               errorMessage.includes('not found');
+    
+    if (isFunctionNotFound) {
+      // Function doesn't exist, use manual increment
+      console.warn("RPC function 'increment_flashcard_counts' not found, using manual increment");
+      return await updateFlashcardStatusManual(supabase, user.id, flashcardId, status);
+    } else {
+      // Other error - log it and try manual increment as fallback
+      console.error("RPC error (will try manual increment):", rpcError);
+      return await updateFlashcardStatusManual(supabase, user.id, flashcardId, status);
+    }
+  }
+
+  return { success: true };
+}
+
+async function updateFlashcardStatusManual(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  flashcardId: string,
+  status: 'remembered' | 'forgotten'
+) {
+  // First, check if count columns exist and get current progress
+  let hasCountColumns = true;
+  
+  // Try to get current progress with counts
   const { data: currentProgress, error: fetchError } = await supabase
     .from("user_flashcard_progress")
     .select("remembered_count, forgotten_count")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("flashcard_id", flashcardId)
     .maybeSingle();
 
@@ -330,58 +374,95 @@ export async function updateFlashcardStatus(flashcardId: string, status: 'rememb
       // PGRST116 is "not found" which is fine
       console.warn("Warning fetching progress:", fetchError);
     }
-  } else if (currentProgress) {
-    currentRemembered = currentProgress.remembered_count ?? 0;
-    currentForgotten = currentProgress.forgotten_count ?? 0;
   }
 
-  // Calculate counts
-  const rememberedCount = currentRemembered + (status === 'remembered' ? 1 : 0);
-  const forgottenCount = currentForgotten + (status === 'forgotten' ? 1 : 0);
+  // Record exists if we got data back (not null)
+  const recordExists = currentProgress !== null;
 
-  // Build base upsert data
-  const baseData = {
-    user_id: user.id,
-    flashcard_id: flashcardId,
-    status,
-    last_reviewed_at: new Date().toISOString(),
-  };
-
-  // Try with counts first if columns exist
+  // If count columns exist, use them
   if (hasCountColumns) {
-    const { error } = await supabase
-      .from("user_flashcard_progress")
-      .upsert(
-        {
-          ...baseData,
-          remembered_count: rememberedCount,
-          forgotten_count: forgottenCount,
-        },
-        { onConflict: "user_id, flashcard_id" }
-      );
+    const currentRemembered = currentProgress?.remembered_count ?? 0;
+    const currentForgotten = currentProgress?.forgotten_count ?? 0;
+    
+    const newRemembered = currentRemembered + (status === 'remembered' ? 1 : 0);
+    const newForgotten = currentForgotten + (status === 'forgotten' ? 1 : 0);
 
-    if (error) {
-      // If it's a column error, retry without counts
-      if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('remembered_count') || error.message?.includes('forgotten_count')) {
-        hasCountColumns = false;
+    if (recordExists) {
+      // Update existing record - explicitly increment
+      const { error } = await supabase
+        .from("user_flashcard_progress")
+        .update({
+          status,
+          last_reviewed_at: new Date().toISOString(),
+          remembered_count: newRemembered,
+          forgotten_count: newForgotten,
+        })
+        .eq("user_id", userId)
+        .eq("flashcard_id", flashcardId);
+
+      if (error) {
+        // If it's a column error, retry without counts
+        if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('remembered_count') || error.message?.includes('forgotten_count')) {
+          hasCountColumns = false;
+        } else {
+          return { error: error.message };
+        }
       } else {
-        return { error: error.message };
+        return { success: true };
       }
     } else {
-      return { success: true };
+      // Insert new record
+      const { error } = await supabase
+        .from("user_flashcard_progress")
+        .insert({
+          user_id: userId,
+          flashcard_id: flashcardId,
+          status,
+          last_reviewed_at: new Date().toISOString(),
+          remembered_count: newRemembered,
+          forgotten_count: newForgotten,
+        });
+
+      if (error) {
+        // If it's a column error, retry without counts
+        if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('remembered_count') || error.message?.includes('forgotten_count')) {
+          hasCountColumns = false;
+        } else {
+          return { error: error.message };
+        }
+      } else {
+        return { success: true };
+      }
     }
   }
 
-  // Fallback: upsert without count columns
-  const { error } = await supabase
-    .from("user_flashcard_progress")
-    .upsert(
-      baseData,
-      { onConflict: "user_id, flashcard_id" }
-    );
+  // Fallback: upsert without count columns (if columns don't exist)
+  if (recordExists) {
+    const { error } = await supabase
+      .from("user_flashcard_progress")
+      .update({
+        status,
+        last_reviewed_at: new Date().toISOString(),
+      })
+      .eq("user_id", userId)
+      .eq("flashcard_id", flashcardId);
 
-  if (error) {
-    return { error: error.message };
+    if (error) {
+      return { error: error.message };
+    }
+  } else {
+    const { error } = await supabase
+      .from("user_flashcard_progress")
+      .insert({
+        user_id: userId,
+        flashcard_id: flashcardId,
+        status,
+        last_reviewed_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      return { error: error.message };
+    }
   }
 
   return { success: true };

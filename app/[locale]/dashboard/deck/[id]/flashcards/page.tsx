@@ -141,11 +141,17 @@ export default function FlashcardsListPage() {
     // If error, try without count columns (migration might not be run)
     if (progressErrorWithCounts) {
       const errorMessage = progressErrorWithCounts.message || JSON.stringify(progressErrorWithCounts);
-      const isColumnError = progressErrorWithCounts.code === '42703' || 
+      const errorCode = progressErrorWithCounts.code || '';
+      // Check if it's a column error (42703 = undefined_column, PGRST204 = PostgREST error for missing column)
+      // Also check for 400 Bad Request which often means column doesn't exist
+      const isColumnError = errorCode === '42703' || 
+                           errorCode === 'PGRST204' ||
                            errorMessage.toLowerCase().includes('column') ||
                            errorMessage.includes('remembered_count') ||
-                           errorMessage.includes('forgotten_count');
+                           errorMessage.includes('forgotten_count') ||
+                           errorMessage.includes('does not exist');
       
+      // If it's a column error or any error, try fallback (columns might not exist)
       if (isColumnError) {
         console.warn("Count columns don't exist - migration may not be run. Using fallback mode.");
         hasCountColumns = false;
@@ -164,8 +170,22 @@ export default function FlashcardsListPage() {
           progressData = progressDataWithoutCounts;
         }
       } else {
-        console.error("Error fetching progress:", progressErrorWithCounts);
-        progressData = null;
+        // For any other error, also try fallback (might be column issue)
+        console.warn("Error fetching with count columns, trying fallback:", progressErrorWithCounts);
+        hasCountColumns = false;
+        
+        const { data: progressDataWithoutCounts, error: progressErrorWithoutCounts } = await supabase
+          .from("user_flashcard_progress")
+          .select("flashcard_id, status, last_reviewed_at")
+          .eq("user_id", user.id)
+          .in("flashcard_id", flashcardIds);
+        
+        if (progressErrorWithoutCounts) {
+          console.error("Error fetching progress:", progressErrorWithoutCounts);
+          progressData = null;
+        } else {
+          progressData = progressDataWithoutCounts;
+        }
       }
     } else {
       progressData = progressDataWithCounts;
