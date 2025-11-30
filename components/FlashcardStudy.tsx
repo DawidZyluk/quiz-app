@@ -73,8 +73,9 @@ export function FlashcardStudy({ flashcards, onExit }: FlashcardStudyProps) {
 
       <div className="perspective-1000 h-[400px] w-full relative cursor-pointer" onClick={() => setIsFlipped(!isFlipped)}>
         <motion.div
-          className="w-full h-full absolute transition-all duration-500 preserve-3d"
+          className="w-full h-full absolute preserve-3d"
           animate={{ rotateY: isFlipped ? 180 : 0 }}
+          transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
         >
           {/* Front (Question) */}
           <Card className="absolute inset-0 w-full h-full backface-hidden flex flex-col items-center justify-center p-8 text-center border-2">
