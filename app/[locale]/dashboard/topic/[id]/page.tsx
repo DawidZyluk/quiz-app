@@ -1,15 +1,35 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Plus, Layers, FileQuestion } from "lucide-react";
+import { ArrowLeft, Plus, Layers, FileQuestion, BookOpen, GraduationCap, List, MoreVertical, Edit, Trash2 } from "lucide-react";
 import { CreateDeckDialog } from "@/components/CreateDeckDialog";
 import { CreateQuizDialog } from "@/components/CreateQuizDialog";
+import { EditDeckDialog } from "@/components/EditDeckDialog";
+import { EditQuizDialog } from "@/components/EditQuizDialog";
+import { deleteDeck, deleteQuiz } from "@/lib/actions";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -43,6 +63,7 @@ interface Quiz {
 
 export default function TopicPage() {
   const { id } = useParams();
+  const searchParams = useSearchParams();
   const { user, loading } = useAuth();
   const router = useRouter();
   const supabase = createClient();
@@ -50,6 +71,14 @@ export default function TopicPage() {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
+  const [editingDeck, setEditingDeck] = useState<Deck | null>(null);
+  const [deletingDeck, setDeletingDeck] = useState<Deck | null>(null);
+  const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
+  const [deletingQuiz, setDeletingQuiz] = useState<Quiz | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  
+  // Get active tab from query params, default to flashcards
+  const activeTab = searchParams.get('tab') || 'flashcards';
 
   useEffect(() => {
     if (!loading && !user) {
@@ -99,6 +128,44 @@ export default function TopicPage() {
     fetchData();
   }, [fetchData]);
 
+  const handleDeleteDeck = async () => {
+    if (!deletingDeck) return;
+    
+    setDeleteLoading(true);
+    try {
+      const result = await deleteDeck(deletingDeck.id);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      toast.success("Deck deleted successfully!");
+      setDeletingDeck(null);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || "Error deleting deck");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleDeleteQuiz = async () => {
+    if (!deletingQuiz) return;
+    
+    setDeleteLoading(true);
+    try {
+      const result = await deleteQuiz(deletingQuiz.id);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      toast.success("Quiz deleted successfully!");
+      setDeletingQuiz(null);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || "Error deleting quiz");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   if (loading || pageLoading) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
@@ -135,7 +202,11 @@ export default function TopicPage() {
           </div>
         </div>
 
-        <Tabs defaultValue="flashcards" className="w-full">
+        <Tabs value={activeTab} onValueChange={(value) => {
+          const params = new URLSearchParams(searchParams.toString());
+          params.set('tab', value);
+          router.push(`/dashboard/topic/${id}?${params.toString()}`);
+        }} className="w-full">
           <TabsList className="grid w-full grid-cols-2 max-w-[400px]">
             <TabsTrigger value="flashcards">Flashcards</TabsTrigger>
             <TabsTrigger value="quizzes">Tests</TabsTrigger>
@@ -159,17 +230,76 @@ export default function TopicPage() {
                 decks.map((deck) => (
                   <Card 
                     key={deck.id} 
-                    className="cursor-pointer hover:shadow-md transition-shadow p-6"
-                    onClick={() => router.push(`/dashboard/deck/${deck.id}`)}
+                    className="hover:shadow-md transition-shadow p-6 relative"
                   >
-                    <CardHeader className="p-0 mb-4">
+                    <div className="absolute top-2 right-2 z-10">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => setEditingDeck(deck)}
+                          >
+                            <Edit className="mr-2 h-4 w-4" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => setDeletingDeck(deck)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <CardHeader className="p-0 mb-4 pr-8">
                       <CardTitle>{deck.name}</CardTitle>
                       {deck.description && <CardDescription>{deck.description}</CardDescription>}
                     </CardHeader>
-                    <CardContent className="p-0">
-                      <p className="text-sm text-muted-foreground">
+                    <CardContent className="p-0 space-y-3">
+                      <p className="text-sm text-muted-foreground mb-4">
                         {deck.flashcards?.[0]?.count || 0} cards
                       </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => router.push(`/dashboard/deck/${deck.id}?mode=study`)}
+                          disabled={(deck.flashcards?.[0]?.count || 0) === 0}
+                        >
+                          <BookOpen className="mr-2 h-4 w-4" />
+                          Study
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => router.push(`/dashboard/deck/${deck.id}?mode=exam`)}
+                          disabled={(deck.flashcards?.[0]?.count || 0) === 0}
+                        >
+                          <GraduationCap className="mr-2 h-4 w-4" />
+                          Exam
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => router.push(`/dashboard/deck/${deck.id}/flashcards`)}
+                        >
+                          <List className="mr-2 h-4 w-4" />
+                          List
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 ))
@@ -195,17 +325,76 @@ export default function TopicPage() {
                 quizzes.map((quiz) => (
                   <Card 
                     key={quiz.id} 
-                    className="cursor-pointer hover:shadow-md transition-shadow p-6"
-                    onClick={() => router.push(`/dashboard/quiz/${quiz.id}`)}
+                    className="hover:shadow-md transition-shadow p-6 relative"
                   >
-                    <CardHeader className="p-0 mb-4">
+                    <div className="absolute top-2 right-2 z-10">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => setEditingQuiz(quiz)}
+                          >
+                            <Edit className="mr-2 h-4 w-4" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => setDeletingQuiz(quiz)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <CardHeader className="p-0 mb-4 pr-8">
                       <CardTitle>{quiz.title}</CardTitle>
                       {quiz.description && <CardDescription>{quiz.description}</CardDescription>}
                     </CardHeader>
-                    <CardContent className="p-0">
-                      <p className="text-sm text-muted-foreground">
+                    <CardContent className="p-0 space-y-3">
+                      <p className="text-sm text-muted-foreground mb-4">
                         {quiz.questions?.[0]?.count || 0} questions
                       </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => router.push(`/dashboard/quiz/${quiz.id}?mode=study`)}
+                          disabled={(quiz.questions?.[0]?.count || 0) === 0}
+                        >
+                          <BookOpen className="mr-2 h-4 w-4" />
+                          Study
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => router.push(`/dashboard/quiz/${quiz.id}?mode=exam`)}
+                          disabled={(quiz.questions?.[0]?.count || 0) === 0}
+                        >
+                          <GraduationCap className="mr-2 h-4 w-4" />
+                          Exam
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => router.push(`/dashboard/quiz/${quiz.id}/questions`)}
+                        >
+                          <List className="mr-2 h-4 w-4" />
+                          List
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 ))
@@ -213,6 +402,78 @@ export default function TopicPage() {
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* Edit Dialog */}
+        {editingDeck && (
+          <EditDeckDialog
+            deck={editingDeck}
+            open={!!editingDeck}
+            onOpenChange={(open) => !open && setEditingDeck(null)}
+            onDeckUpdated={() => {
+              setEditingDeck(null);
+              fetchData();
+            }}
+          />
+        )}
+
+        {/* Edit Quiz Dialog */}
+        {editingQuiz && (
+          <EditQuizDialog
+            quiz={editingQuiz}
+            open={!!editingQuiz}
+            onOpenChange={(open) => !open && setEditingQuiz(null)}
+            onQuizUpdated={() => {
+              setEditingQuiz(null);
+              fetchData();
+            }}
+          />
+        )}
+
+        {/* Delete Deck Confirmation Dialog */}
+        <AlertDialog open={!!deletingDeck} onOpenChange={(open) => !open && setDeletingDeck(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Deck?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the deck
+                {deletingDeck && ` "${deletingDeck.name}"`} and all associated flashcards.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteDeck}
+                disabled={deleteLoading}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleteLoading ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Delete Quiz Confirmation Dialog */}
+        <AlertDialog open={!!deletingQuiz} onOpenChange={(open) => !open && setDeletingQuiz(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Quiz?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the quiz
+                {deletingQuiz && ` "${deletingQuiz.title}"`} and all associated questions and answers.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteQuiz}
+                disabled={deleteLoading}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleteLoading ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { RotateCcw, X, Check, ArrowLeft } from "lucide-react";
 import { motion } from "motion/react";
 import { updateFlashcardStatus } from "@/lib/actions";
@@ -34,7 +35,8 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
-  const [stats, setStats] = useState({ remembered: 0, forgotten: 0 });
+  const [stats, setStats] = useState({ remembered: 0, forgotten: 0, skipped: 0 });
+  const [flashcardStatuses, setFlashcardStatuses] = useState<Map<string, 'remembered' | 'forgotten' | 'skipped'>>(new Map());
   const [showExitAlert, setShowExitAlert] = useState(false);
 
   // Reset state when flashcards change or component mounts
@@ -42,13 +44,21 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
     setCurrentIndex(0);
     setIsFlipped(false);
     setIsCompleted(false);
-    setStats({ remembered: 0, forgotten: 0 });
+    setStats({ remembered: 0, forgotten: 0, skipped: 0 });
+    setFlashcardStatuses(new Map());
   }, [flashcards]);
 
   const currentCard = flashcards[currentIndex];
   const progress = ((currentIndex) / flashcards.length) * 100;
 
   const handleRate = async (status: 'remembered' | 'forgotten') => {
+    // Track status for this flashcard
+    setFlashcardStatuses(prev => {
+      const newMap = new Map(prev);
+      newMap.set(currentCard.id, status);
+      return newMap;
+    });
+
     // Optimistic update
     setStats(prev => ({
       ...prev,
@@ -56,16 +66,63 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
     }));
 
     // Update backend
-    const result = await updateFlashcardStatus(currentCard.id, status);
-    if (result.error) {
-      toast.error("Failed to save progress");
+    try {
+      const result = await updateFlashcardStatus(currentCard.id, status);
+      if (result.error) {
+        console.error("Error saving progress:", result.error);
+        toast.error("Failed to save progress: " + result.error);
+        // Revert optimistic update on error
+        setStats(prev => ({
+          ...prev,
+          [status]: prev[status] - 1
+        }));
+        setFlashcardStatuses(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(currentCard.id);
+          return newMap;
+        });
+        return;
+      }
+    } catch (error: any) {
+      console.error("Exception saving progress:", error);
+      toast.error("Failed to save progress: " + (error.message || "Unknown error"));
+      // Revert optimistic update on error
+      setStats(prev => ({
+        ...prev,
+        [status]: prev[status] - 1
+      }));
+      setFlashcardStatuses(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(currentCard.id);
+        return newMap;
+      });
+      return;
     }
 
-    // Move to next card
+    // Move to next card or complete exam
     if (currentIndex < flashcards.length - 1) {
       setIsFlipped(false);
       setTimeout(() => setCurrentIndex(prev => prev + 1), 150);
     } else {
+      // This is the last card - mark exam as completed
+      // Mark any remaining cards as skipped (shouldn't be any, but just in case)
+      const remaining = flashcards.filter((_, idx) => idx > currentIndex);
+      if (remaining.length > 0) {
+        setFlashcardStatuses(prev => {
+          const newMap = new Map(prev);
+          remaining.forEach(card => {
+            if (!newMap.has(card.id)) {
+              newMap.set(card.id, 'skipped');
+            }
+          });
+          return newMap;
+        });
+        setStats(prev => ({
+          ...prev,
+          skipped: prev.skipped + remaining.length
+        }));
+      }
+      // Mark exam as completed
       setIsCompleted(true);
     }
   };
@@ -93,11 +150,15 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
   }
 
   if (isCompleted) {
+    const rememberedCards = flashcards.filter(card => flashcardStatuses.get(card.id) === 'remembered');
+    const forgottenCards = flashcards.filter(card => flashcardStatuses.get(card.id) === 'forgotten');
+    const skippedCards = flashcards.filter(card => flashcardStatuses.get(card.id) === 'skipped' || !flashcardStatuses.has(card.id));
+
     return (
-      <div className="flex flex-col items-center justify-center max-w-md mx-auto gap-8 py-12">
+      <div className="flex flex-col items-center max-w-4xl mx-auto gap-8 py-12 px-4">
         <h2 className="text-3xl font-bold">Exam Completed!</h2>
         
-        <div className="grid grid-cols-2 gap-4 w-full">
+        <div className="grid grid-cols-3 gap-4 w-full">
           <Card className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-900">
             <CardContent className="flex flex-col items-center justify-center p-6">
               <span className="text-4xl font-bold text-green-600 dark:text-green-400">{stats.remembered}</span>
@@ -111,10 +172,91 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
               <span className="text-sm text-muted-foreground">Forgotten</span>
             </CardContent>
           </Card>
+
+          <Card className="bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-900">
+            <CardContent className="flex flex-col items-center justify-center p-6">
+              <span className="text-4xl font-bold text-yellow-600 dark:text-yellow-400">{stats.skipped}</span>
+              <span className="text-sm text-muted-foreground">Skipped</span>
+            </CardContent>
+          </Card>
         </div>
 
-        <div className="flex gap-4">
-          <Button onClick={onExit} variant="outline">Back to Deck</Button>
+        {/* Detailed Summary */}
+        <div className="w-full">
+            <div className="space-y-4 pr-4">
+              {rememberedCards.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-semibold mb-2 text-green-600 dark:text-green-400">
+                    ✓ Remembered ({rememberedCards.length})
+                  </h3>
+                  <div className="space-y-2">
+                    {rememberedCards.map((card) => (
+                      <Card key={card.id} className="bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-900">
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <p className="font-medium text-sm mb-1">Q: {card.question}</p>
+                              <p className="text-sm text-muted-foreground">A: {card.answer}</p>
+                            </div>
+                            <Check className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0" />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {forgottenCards.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-semibold mb-2 text-red-600 dark:text-red-400">
+                    ✗ Forgotten ({forgottenCards.length})
+                  </h3>
+                  <div className="space-y-2">
+                    {forgottenCards.map((card) => (
+                      <Card key={card.id} className="bg-red-50/50 dark:bg-red-900/10 border-red-200 dark:border-red-900">
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <p className="font-medium text-sm mb-1">Q: {card.question}</p>
+                              <p className="text-sm text-muted-foreground">A: {card.answer}</p>
+                            </div>
+                            <X className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0" />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {skippedCards.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-semibold mb-2 text-yellow-600 dark:text-yellow-400">
+                    ⊘ Skipped ({skippedCards.length})
+                  </h3>
+                  <div className="space-y-2">
+                    {skippedCards.map((card) => (
+                      <Card key={card.id} className="bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-900">
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <p className="font-medium text-sm mb-1">Q: {card.question}</p>
+                              <p className="text-sm text-muted-foreground">A: {card.answer}</p>
+                            </div>
+                            <span className="text-yellow-600 dark:text-yellow-400 shrink-0">⊘</span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+        </div>
+
+        <div className="flex gap-4 w-full justify-center">
+          <Button onClick={onExit} variant="outline">Back to Topic</Button>
           <Button onClick={() => window.location.reload()}>Restart Exam</Button>
         </div>
       </div>
@@ -153,8 +295,9 @@ export function FlashcardExam({ flashcards, onExit }: FlashcardExamProps) {
 
       <div className="perspective-1000 h-[400px] w-full relative cursor-pointer" onClick={() => setIsFlipped(!isFlipped)}>
         <motion.div
-          className="w-full h-full absolute transition-all duration-500 preserve-3d"
+          className="w-full h-full absolute preserve-3d"
           animate={{ rotateY: isFlipped ? 180 : 0 }}
+          transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
         >
           {/* Front (Question) */}
           <Card className="absolute inset-0 w-full h-full backface-hidden flex flex-col items-center justify-center p-8 text-center border-2 shadow-lg">

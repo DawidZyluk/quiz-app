@@ -193,6 +193,113 @@ export async function createQuestion(data: QuestionData) {
   return { success: true };
 }
 
+export async function updateQuestion(questionId: string, data: QuestionData) {
+  const supabase = await createClient();
+  const { question_text, question_type, quiz_id, answers } = data;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify ownership through quiz -> topic
+  const { data: question, error: fetchError } = await supabase
+    .from("questions")
+    .select("quiz_id, quizzes!inner(topic_id, topics!inner(user_id))")
+    .eq("id", questionId)
+    .single();
+
+  if (fetchError || !question) {
+    return { error: "Question not found" };
+  }
+
+  // @ts-ignore
+  if (question.quizzes.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // Update question
+  const { error: updateError } = await supabase
+    .from("questions")
+    .update({
+      question_text,
+      question_type,
+    })
+    .eq("id", questionId);
+
+  if (updateError) {
+    return { error: updateError.message };
+  }
+
+  // Delete old answers and insert new ones
+  await supabase.from("answers").delete().eq("question_id", questionId);
+
+  const answersToInsert = answers.map((ans) => ({
+    question_id: questionId,
+    answer_text: ans.answer_text,
+    is_correct: ans.is_correct,
+  }));
+
+  const { error: answersError } = await supabase
+    .from("answers")
+    .insert(answersToInsert);
+
+  if (answersError) {
+    return { error: answersError.message };
+  }
+
+  revalidatePath(`/dashboard/quiz/${quiz_id}`);
+  revalidatePath(`/dashboard/quiz/${quiz_id}/questions`);
+  return { success: true };
+}
+
+export async function deleteQuestion(questionId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Get question to check ownership and get quiz_id
+  const { data: question, error: fetchError } = await supabase
+    .from("questions")
+    .select("quiz_id, quizzes!inner(topic_id, topics!inner(user_id))")
+    .eq("id", questionId)
+    .single();
+
+  if (fetchError || !question) {
+    return { error: "Question not found" };
+  }
+
+  // @ts-ignore
+  if (question.quizzes.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // @ts-ignore
+  const quizId = question.quiz_id;
+
+  // Delete question (cascade will handle related answers and progress)
+  const { error } = await supabase
+    .from("questions")
+    .delete()
+    .eq("id", questionId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/quiz/${quizId}`);
+  revalidatePath(`/dashboard/quiz/${quizId}/questions`);
+  return { success: true };
+}
+
 export async function updateFlashcardStatus(flashcardId: string, status: 'remembered' | 'forgotten') {
   const supabase = await createClient();
   const {
@@ -203,20 +310,159 @@ export async function updateFlashcardStatus(flashcardId: string, status: 'rememb
     return { error: "Unauthorized" };
   }
 
-  const { error } = await supabase
+  // In exam mode, each time user rates a flashcard, we increment the appropriate counter
+  // If status is 'remembered', increment remembered_count by 1, leave forgotten_count unchanged
+  // If status is 'forgotten', increment forgotten_count by 1, leave remembered_count unchanged
+  // This allows tracking total attempts: total_reviews = remembered_count + forgotten_count
+  const rememberedIncrement = status === 'remembered' ? 1 : 0;  // Add 1 to remembered_count if remembered
+  const forgottenIncrement = status === 'forgotten' ? 1 : 0;    // Add 1 to forgotten_count if forgotten
+
+  // Try to use atomic RPC function first
+  const { error: rpcError } = await supabase.rpc('increment_flashcard_counts', {
+    p_user_id: user.id,
+    p_flashcard_id: flashcardId,
+    p_status: status,
+    p_remembered_increment: rememberedIncrement,  // How much to add to remembered_count (0 or 1)
+    p_forgotten_increment: forgottenIncrement,    // How much to add to forgotten_count (0 or 1)
+  });
+
+  // If RPC function doesn't exist or fails, fall back to manual increment
+  if (rpcError) {
+    const errorCode = rpcError.code || '';
+    const errorMessage = rpcError.message || '';
+    const isFunctionNotFound = errorCode === '42883' || 
+                               errorMessage.includes('function') || 
+                               errorMessage.includes('does not exist') ||
+                               errorMessage.includes('not found');
+    
+    if (isFunctionNotFound) {
+      // Function doesn't exist, use manual increment
+      console.warn("RPC function 'increment_flashcard_counts' not found, using manual increment");
+      return await updateFlashcardStatusManual(supabase, user.id, flashcardId, status);
+    } else {
+      // Other error - log it and try manual increment as fallback
+      console.error("RPC error (will try manual increment):", rpcError);
+      return await updateFlashcardStatusManual(supabase, user.id, flashcardId, status);
+    }
+  }
+
+  return { success: true };
+}
+
+async function updateFlashcardStatusManual(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  flashcardId: string,
+  status: 'remembered' | 'forgotten'
+) {
+  // First, check if count columns exist and get current progress
+  let hasCountColumns = true;
+  
+  // Try to get current progress with counts
+  const { data: currentProgress, error: fetchError } = await supabase
     .from("user_flashcard_progress")
-    .upsert(
-      {
-        user_id: user.id,
+    .select("remembered_count, forgotten_count")
+    .eq("user_id", userId)
+    .eq("flashcard_id", flashcardId)
+    .maybeSingle();
+
+  // Check if columns exist - if error is about column, they don't exist
+  if (fetchError) {
+    if (fetchError.code === '42703' || fetchError.message?.includes('column')) {
+      hasCountColumns = false;
+    } else if (fetchError.code !== 'PGRST116') {
+      // PGRST116 is "not found" which is fine
+      console.warn("Warning fetching progress:", fetchError);
+    }
+  }
+
+  // Record exists if we got data back (not null)
+  const recordExists = currentProgress !== null;
+
+  // If count columns exist, use them
+  if (hasCountColumns) {
+    const currentRemembered = currentProgress?.remembered_count ?? 0;
+    const currentForgotten = currentProgress?.forgotten_count ?? 0;
+    
+    const newRemembered = currentRemembered + (status === 'remembered' ? 1 : 0);
+    const newForgotten = currentForgotten + (status === 'forgotten' ? 1 : 0);
+
+    if (recordExists) {
+      // Update existing record - explicitly increment
+      const { error } = await supabase
+        .from("user_flashcard_progress")
+        .update({
+          status,
+          last_reviewed_at: new Date().toISOString(),
+          remembered_count: newRemembered,
+          forgotten_count: newForgotten,
+        })
+        .eq("user_id", userId)
+        .eq("flashcard_id", flashcardId);
+
+      if (error) {
+        // If it's a column error, retry without counts
+        if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('remembered_count') || error.message?.includes('forgotten_count')) {
+          hasCountColumns = false;
+        } else {
+          return { error: error.message };
+        }
+      } else {
+        return { success: true };
+      }
+    } else {
+      // Insert new record
+      const { error } = await supabase
+        .from("user_flashcard_progress")
+        .insert({
+          user_id: userId,
+          flashcard_id: flashcardId,
+          status,
+          last_reviewed_at: new Date().toISOString(),
+          remembered_count: newRemembered,
+          forgotten_count: newForgotten,
+        });
+
+      if (error) {
+        // If it's a column error, retry without counts
+        if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('remembered_count') || error.message?.includes('forgotten_count')) {
+          hasCountColumns = false;
+        } else {
+          return { error: error.message };
+        }
+      } else {
+        return { success: true };
+      }
+    }
+  }
+
+  // Fallback: upsert without count columns (if columns don't exist)
+  if (recordExists) {
+    const { error } = await supabase
+      .from("user_flashcard_progress")
+      .update({
+        status,
+        last_reviewed_at: new Date().toISOString(),
+      })
+      .eq("user_id", userId)
+      .eq("flashcard_id", flashcardId);
+
+    if (error) {
+      return { error: error.message };
+    }
+  } else {
+    const { error } = await supabase
+      .from("user_flashcard_progress")
+      .insert({
+        user_id: userId,
         flashcard_id: flashcardId,
         status,
         last_reviewed_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id, flashcard_id" }
-    );
+      });
 
-  if (error) {
-    return { error: error.message };
+    if (error) {
+      return { error: error.message };
+    }
   }
 
   return { success: true };
@@ -320,5 +566,446 @@ export async function resetQuizProgress(quizId: string) {
   }
 
   revalidatePath(`/dashboard/quiz/${quizId}`);
+  return { success: true };
+}
+
+export async function updateQuiz(quizId: string, formData: FormData) {
+  const supabase = await createClient();
+  const title = formData.get("title") as string;
+  const description = formData.get("description") as string;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify quiz ownership through topic
+  const { data: quiz, error: fetchError } = await supabase
+    .from("quizzes")
+    .select("topic_id, topics!inner(user_id)")
+    .eq("id", quizId)
+    .single();
+
+  if (fetchError || !quiz) {
+    return { error: "Quiz not found" };
+  }
+
+  // @ts-ignore
+  if (quiz.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase
+    .from("quizzes")
+    .update({
+      title,
+      description: description || null,
+    })
+    .eq("id", quizId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${quiz.topic_id}`);
+  revalidatePath(`/dashboard/quiz/${quizId}`);
+  return { success: true };
+}
+
+export async function deleteQuiz(quizId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify quiz ownership through topic
+  const { data: quiz, error: fetchError } = await supabase
+    .from("quizzes")
+    .select("topic_id, topics!inner(user_id)")
+    .eq("id", quizId)
+    .single();
+
+  if (fetchError || !quiz) {
+    return { error: "Quiz not found" };
+  }
+
+  // @ts-ignore
+  if (quiz.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const topicId = quiz.topic_id;
+
+  // Delete quiz (cascade will handle related questions, answers, and progress)
+  const { error } = await supabase
+    .from("quizzes")
+    .delete()
+    .eq("id", quizId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${topicId}`);
+  return { success: true };
+}
+
+export async function resetFlashcardProgress(deckId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Find all flashcards in the deck
+  const { data: flashcards, error: fetchError } = await supabase
+    .from("flashcards")
+    .select("id")
+    .eq("deck_id", deckId);
+
+  if (fetchError) {
+    return { error: fetchError.message };
+  }
+
+  const flashcardIds = flashcards.map((f) => f.id);
+
+  if (flashcardIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("user_flashcard_progress")
+      .delete()
+      .eq("user_id", user.id)
+      .in("flashcard_id", flashcardIds);
+
+    if (deleteError) {
+      return { error: deleteError.message };
+    }
+  }
+
+  revalidatePath(`/dashboard/deck/${deckId}/flashcards`);
+  return { success: true };
+}
+
+export async function updateDeck(deckId: string, formData: FormData) {
+  const supabase = await createClient();
+  const name = formData.get("name") as string;
+  const description = formData.get("description") as string;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify deck ownership through topic
+  const { data: deck, error: fetchError } = await supabase
+    .from("flashcard_decks")
+    .select("topic_id, topics!inner(user_id)")
+    .eq("id", deckId)
+    .single();
+
+  if (fetchError || !deck) {
+    return { error: "Deck not found" };
+  }
+
+  // @ts-ignore
+  if (deck.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase
+    .from("flashcard_decks")
+    .update({
+      name,
+      description: description || null,
+    })
+    .eq("id", deckId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${deck.topic_id}`);
+  revalidatePath(`/dashboard/deck/${deckId}`);
+  return { success: true };
+}
+
+export async function deleteDeck(deckId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Get deck to check ownership and get topic_id
+  const { data: deck, error: fetchError } = await supabase
+    .from("flashcard_decks")
+    .select("topic_id, topics!inner(user_id)")
+    .eq("id", deckId)
+    .single();
+
+  if (fetchError || !deck) {
+    return { error: "Deck not found" };
+  }
+
+  // @ts-ignore
+  if (deck.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const topicId = deck.topic_id;
+
+  // Delete deck (cascade will handle related flashcards and progress)
+  const { error } = await supabase
+    .from("flashcard_decks")
+    .delete()
+    .eq("id", deckId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/topic/${topicId}`);
+  return { success: true };
+}
+
+export async function updateFlashcard(flashcardId: string, formData: FormData) {
+  const supabase = await createClient();
+  const question = formData.get("question") as string;
+  const answer = formData.get("answer") as string;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify flashcard ownership through deck -> topic
+  const { data: flashcard, error: fetchError } = await supabase
+    .from("flashcards")
+    .select("deck_id, flashcard_decks!inner(topic_id, topics!inner(user_id))")
+    .eq("id", flashcardId)
+    .single();
+
+  if (fetchError || !flashcard) {
+    return { error: "Flashcard not found" };
+  }
+
+  // @ts-ignore
+  if (flashcard.flashcard_decks.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error } = await supabase
+    .from("flashcards")
+    .update({
+      question,
+      answer,
+    })
+    .eq("id", flashcardId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  // @ts-ignore
+  const deckId = flashcard.deck_id;
+  revalidatePath(`/dashboard/deck/${deckId}`);
+  revalidatePath(`/dashboard/deck/${deckId}/flashcards`);
+  return { success: true };
+}
+
+export async function deleteFlashcard(flashcardId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Get flashcard to check ownership and get deck_id
+  const { data: flashcard, error: fetchError } = await supabase
+    .from("flashcards")
+    .select("deck_id, flashcard_decks!inner(topic_id, topics!inner(user_id))")
+    .eq("id", flashcardId)
+    .single();
+
+  if (fetchError || !flashcard) {
+    return { error: "Flashcard not found" };
+  }
+
+  // @ts-ignore
+  if (flashcard.flashcard_decks.topics.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // @ts-ignore
+  const deckId = flashcard.deck_id;
+
+  // Delete flashcard (cascade will handle related progress)
+  const { error } = await supabase
+    .from("flashcards")
+    .delete()
+    .eq("id", flashcardId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath(`/dashboard/deck/${deckId}`);
+  revalidatePath(`/dashboard/deck/${deckId}/flashcards`);
+  return { success: true };
+}
+
+export async function updateTopic(topicId: string, formData: FormData) {
+  const supabase = await createClient();
+  const name = formData.get("name") as string;
+  const imageFile = formData.get("image") as File | null;
+  let image_url = formData.get("image_url") as string | null;
+  const removeImage = formData.get("remove_image") === "true";
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Verify topic ownership
+  const { data: topic, error: fetchError } = await supabase
+    .from("topics")
+    .select("image_url, user_id")
+    .eq("id", topicId)
+    .single();
+
+  if (fetchError || !topic) {
+    return { error: "Topic not found" };
+  }
+
+  if (topic.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // Handle file upload if a file is provided
+  if (imageFile && imageFile.size > 0) {
+    // Delete old image if it exists and is in storage
+    if (topic.image_url && topic.image_url.includes('/storage/v1/object/public/topics/')) {
+      const oldFileName = topic.image_url.split('/topics/')[1];
+      if (oldFileName) {
+        await supabase.storage.from('topics').remove([oldFileName]);
+      }
+    }
+
+    const fileExt = imageFile.name.split('.').pop();
+    const fileName = `${user.id}/${Math.random().toString(36).substring(2)}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('topics')
+      .upload(fileName, imageFile);
+
+    if (uploadError) {
+      return { error: "Failed to upload image: " + uploadError.message };
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('topics')
+      .getPublicUrl(fileName);
+      
+    image_url = publicUrl;
+  } else if (removeImage) {
+    // Delete old image from storage if it exists
+    if (topic.image_url && topic.image_url.includes('/storage/v1/object/public/topics/')) {
+      const oldFileName = topic.image_url.split('/topics/')[1];
+      if (oldFileName) {
+        await supabase.storage.from('topics').remove([oldFileName]);
+      }
+    }
+    image_url = null;
+  } else if (!image_url) {
+    // Keep existing image_url if no new image provided
+    image_url = topic.image_url;
+  }
+
+  const { error } = await supabase
+    .from("topics")
+    .update({
+      name,
+      image_url,
+    })
+    .eq("id", topicId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/dashboard");
+  return { success: true };
+}
+
+export async function deleteTopic(topicId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  // Get topic to check ownership and get image_url
+  const { data: topic, error: fetchError } = await supabase
+    .from("topics")
+    .select("image_url, user_id")
+    .eq("id", topicId)
+    .single();
+
+  if (fetchError || !topic) {
+    return { error: "Topic not found" };
+  }
+
+  if (topic.user_id !== user.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // Delete image from storage if it exists
+  if (topic.image_url && topic.image_url.includes('/storage/v1/object/public/topics/')) {
+    const fileName = topic.image_url.split('/topics/')[1];
+    if (fileName) {
+      await supabase.storage.from('topics').remove([fileName]);
+    }
+  }
+
+  // Delete topic (cascade will handle related quizzes, decks, etc.)
+  const { error } = await supabase
+    .from("topics")
+    .delete()
+    .eq("id", topicId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/dashboard");
   return { success: true };
 }

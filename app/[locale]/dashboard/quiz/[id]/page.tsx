@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,7 @@ interface Question {
 
 export default function QuizPage() {
   const { id } = useParams();
+  const searchParams = useSearchParams();
   const { user, loading } = useAuth();
   const router = useRouter();
   const supabase = createClient();
@@ -68,9 +69,17 @@ export default function QuizPage() {
   const [topic, setTopic] = useState<Topic | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'list' | 'study' | 'exam'>('list');
+  const [viewMode, setViewMode] = useState<'study' | 'exam'>('study');
   const [resetLoading, setResetLoading] = useState(false);
   const [showResetAlert, setShowResetAlert] = useState(false);
+
+  // Check for mode in query params
+  useEffect(() => {
+    const mode = searchParams.get('mode');
+    if (mode === 'study' || mode === 'exam') {
+      setViewMode(mode);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -173,7 +182,13 @@ export default function QuizPage() {
       <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8 flex items-center justify-center">
         <QuizStudy 
           questions={questions} 
-          onExit={() => setViewMode('list')} 
+          onExit={() => {
+            if (quiz?.topic_id) {
+              router.push(`/dashboard/topic/${quiz.topic_id}?tab=quizzes`);
+            } else {
+              router.push("/dashboard");
+            }
+          }} 
         />
       </div>
     );
@@ -184,11 +199,26 @@ export default function QuizPage() {
       <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8 flex items-center justify-center">
         <QuizExam 
           questions={questions} 
-          onExit={() => setViewMode('list')} 
+          onExit={() => {
+            if (quiz?.topic_id) {
+              router.push(`/dashboard/topic/${quiz.topic_id}?tab=quizzes`);
+            } else {
+              router.push("/dashboard");
+            }
+          }} 
         />
       </div>
     );
   }
+
+  // Redirect to questions list if no mode specified
+  useEffect(() => {
+    if (!pageLoading && !searchParams.get('mode')) {
+      router.replace(`/dashboard/quiz/${id}/questions`);
+    }
+  }, [pageLoading, id, router, searchParams]);
+
+  return null;
 
   return (
     <div className="min-h-[calc(100vh-4rem)] p-4 md:p-8">
@@ -235,7 +265,7 @@ export default function QuizPage() {
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={() => router.push(`/dashboard/topic/${quiz.topic_id}`)}>
+              <Button variant="ghost" size="icon" onClick={() => router.push(`/dashboard/topic/${quiz.topic_id}?tab=quizzes`)}>
                 <ArrowLeft className="h-6 w-6" />
               </Button>
               <div>
