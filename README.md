@@ -1,5 +1,10 @@
 # Quizy - Learning Platform
 
+
+https://github.com/user-attachments/assets/8426bdef-534f-4958-821c-bf06333df639
+
+
+
 A modern, serverless learning platform built with Next.js 15, Supabase, and modern web technologies. This project was created for learning purposes, focusing on building serverless applications with Next.js, exploring modern React patterns, and implementing a full-stack application with authentication and database management.
 
 ## About
