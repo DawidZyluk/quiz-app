@@ -1,24 +1,39 @@
-# Next.js Auth Boilerplate with Supabase
+# Quizy - Learning Platform
 
-A modern, production-ready authentication boilerplate built with Next.js 15, Supabase, shadcn/ui, and next-intl.
+A modern, serverless learning platform built with Next.js 15, Supabase, and modern web technologies. This project was created for learning purposes, focusing on building serverless applications with Next.js, exploring modern React patterns, and implementing a full-stack application with authentication and database management.
+
+## About
+
+This project serves as a learning exercise to understand and implement:
+- **Serverless Architecture**: Building applications using Next.js serverless functions and edge runtime
+- **Modern React Patterns**: Utilizing React 19, Server Components, and Client Components effectively
+- **Full-Stack Development**: Integrating frontend with Supabase backend (PostgreSQL, Authentication, Storage)
+- **Type-Safe Development**: TypeScript throughout the entire application
+- **Internationalization**: Multi-language support with next-intl
+- **Modern UI/UX**: Building responsive, accessible interfaces with shadcn/ui and Tailwind CSS
 
 ## Features
 
-- 🔐 **Authentication**: Complete auth flow with Supabase (Login, Register, Password Reset, Update Password).
-- 🌐 **Internationalization (i18n)**: Built-in support for English and Polish (easily extensible).
+- 🔐 **Authentication**: Complete auth flow with Supabase (Login, Register, Password Reset, Update Password)
+- 📚 **Learning Management**: 
+  - Create and organize topics
+  - Build quizzes with multiple questions
+  - Create flashcard decks for spaced repetition learning
+  - Track progress on quizzes and flashcards
+- 🌐 **Internationalization (i18n)**: Built-in support for English and Polish (easily extensible)
 - 🎨 **Theming**: 
-  - Light/Dark mode support.
-  - Multiple color themes: **Zinc** (Default), **Yellow**, **Navy**.
-  - Custom theme switcher in the UI.
-- 💅 **UI Components**: Built with [shadcn/ui](https://ui.shadcn.com/) and Tailwind CSS v4.
+  - Light/Dark mode support
+  - Multiple color themes: **Zinc** (Default), **Yellow**, **Navy**
+  - Custom theme switcher in the UI
+- 💅 **UI Components**: Built with [shadcn/ui](https://ui.shadcn.com/) and Tailwind CSS v4
 - 🛡️ **Security**: 
-  - Protected routes via Middleware.
-  - Form validation with Zod.
-  - Security Settings dialog (2FA UI mock, Delete Account UI).
+  - Protected routes via Middleware
+  - Form validation with Zod
+  - Row-level security policies in Supabase
 - 👤 **User Profile**: 
-  - Edit Profile (Name).
-  - Change Password.
-  - Dashboard with user stats.
+  - Edit Profile (Name)
+  - Change Password
+  - Dashboard with learning progress
 
 ## Tech Stack
 
@@ -56,13 +71,19 @@ A modern, production-ready authentication boilerplate built with Next.js 15, Sup
 
 ## Project Structure
 
-- `/app`: Next.js App Router pages and layouts.
-  - `/[locale]`: Internationalized routes.
-- `/components`: Reusable UI components.
-  - `/ui`: shadcn/ui primitive components.
-- `/lib`: Utility functions and Supabase client setup.
-- `/messages`: Translation JSON files (en.json, pl.json).
-- `/contexts`: React Contexts (AuthContext).
+- `/app`: Next.js App Router pages and layouts
+  - `/[locale]`: Internationalized routes
+  - `/dashboard`: Main application area with topics, quizzes, and flashcards
+- `/components`: Reusable UI components
+  - `/ui`: shadcn/ui primitive components
+  - Dialog components for CRUD operations (topics, quizzes, flashcards)
+  - Study and exam components for quizzes and flashcards
+- `/lib`: Utility functions and Supabase client setup
+  - `/supabase`: Client and server-side Supabase configurations
+  - `actions.ts`: Server actions for data operations
+- `/messages`: Translation JSON files (en.json, pl.json)
+- `/contexts`: React Contexts (AuthContext)
+- `/supabase/migrations`: Database schema migrations
 
 ## Theming
 
@@ -71,6 +92,17 @@ To add a new theme:
 1. Define color variables in `app/globals.css` (e.g., `.new-theme-light`, `.new-theme-dark`).
 2. Register the theme in `app/[locale]/layout.tsx`.
 3. Add the option to `components/ThemeToggle.tsx`.
+
+## Learning Goals
+
+This project was developed to:
+- Master Next.js 15 App Router and serverless architecture
+- Learn Supabase integration (Auth, Database, Storage)
+- Practice building type-safe full-stack applications
+- Understand modern React patterns and Server/Client Components
+- Implement proper authentication and authorization flows
+- Create responsive, accessible user interfaces
+- Work with internationalization in modern web applications
 
 ## License
 
